@@ -1,4 +1,5 @@
 #ifndef parser
+#include <iostream>
 #include <list>
 #include <regex>
 #include <string>
@@ -7,24 +8,61 @@
 
 using json = nlohmann::json;
 
+class UnaryOp {
+    public:
+
+    std::string op;
+
+    UnaryOp(std::list<std::string>& tokens) {
+        if (std::regex_match(tokens.front(), std::regex("[!~-]"))) {
+            op = tokens.front();
+            tokens.pop_front();
+        } else {
+            throw std::runtime_error("invalid operator: " + tokens.front() + "\n");
+        }
+    }
+};
+
 class Expression {
     public:
 
     int value;
 
-    Expression() {}
+    std::string exp_type;
+
+    UnaryOp* unaryop;
+    Expression* expression;
 
     Expression(std::list<std::string>& tokens) {
-        try {
-            value = std::stoi(tokens.front());
-            tokens.pop_front();
-        } catch(...) {
-            throw std::runtime_error("invalid integer literal: " + tokens.front() + "\n");
+        if (!std::regex_match(tokens.front(), std::regex("[!~-]"))) {
+            try {
+                exp_type = "const";
+                value = std::stoi(tokens.front(), 0);
+                tokens.pop_front();
+            } catch (...) {
+                throw std::runtime_error("invalid integer literal: " + tokens.front() + "\n");
+            }
+        } else {
+            unaryop = new UnaryOp(tokens);
+            expression = new Expression(tokens);
+        }
+    }
+
+    ~Expression() {
+        std::cout << "expression destructor called\n";
+        if (exp_type == "unary_op"){
+            delete unaryop;
+            delete expression;
         }
     }
 
     json jsonify() {
-        json ast = value;
+        json ast = {{"type", exp_type}};
+        if (exp_type == "unary_op") {
+            ast["expression"] = expression->jsonify();
+        } else if (exp_type == "const"){
+            ast["value"] = value;
+        }
 
         return ast;
     }
@@ -33,7 +71,7 @@ class Expression {
 class Statement {
     public:
 
-    Expression expression;
+    Expression* expression;
     std::string statement_type;
 
     Statement(std::list<std::string>& tokens) {
@@ -43,12 +81,17 @@ class Statement {
         statement_type = tokens.front();
         tokens.pop_front();
 
-        expression = Expression(tokens);
+        expression = new Expression(tokens);
 
         if (tokens.front() != ";") {
             throw std::runtime_error("expected ';'\n");
         }
         tokens.pop_front();
+    }
+
+    ~Statement() {
+        std::cout << "Statement destructor called\n";
+        delete expression;
     }
 
     json jsonify() {
@@ -61,7 +104,7 @@ class Statement {
         //     expressions_json["expression" + std::to_string(i)] = it->jsonify();
         //     std::advance(it, 1);
         // }
-        ast["expression"] = expression.jsonify();
+        ast["expression"] = expression->jsonify();
         return ast;
     }
 };
@@ -147,6 +190,7 @@ class Program {
         std::list<Function>::iterator it = functions.begin();
 
         for (int i=0; i < functions.size(); i++) {
+            json a = it->jsonify();
             ast["function" + std::to_string(i)] = it->jsonify();
             std::advance(it, 1);
         }

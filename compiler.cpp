@@ -2,7 +2,7 @@
 #include <iostream>
 
 #include "lexer.hpp"
-#include "parser.hpp"
+#include "parser_struct.hpp"
 #include "codegen.hpp"
 
 int main(int argc, char* argv[]) {
@@ -11,13 +11,13 @@ int main(int argc, char* argv[]) {
 
     std::list<std::string> tokens = lex(file);
 
-    Program prog(tokens);
+    Program prog = parse_program(tokens);
 
-    json ast = prog.jsonify();
+    json ast = jsonify(prog);
     std::cout << ast.dump(4);
 
-    std::filebuf fb;
-    fb.open("out.s", std::ios::out);
-    std::ostream asm_out(&fb);
-    asm_out << codegen_x86(prog);
+    // std::filebuf fb;
+    // fb.open("out.s", std::ios::out);
+    // std::ostream asm_out(&fb);
+    // asm_out << codegen_x86(prog);
 }

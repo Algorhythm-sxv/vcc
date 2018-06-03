@@ -1,7 +1,7 @@
 #include <fstream>
 #include <string>
 
-#include "parser.hpp"
+#include "parser_struct.hpp"
 #include <boost/format.hpp>
 
 
@@ -15,7 +15,7 @@ std::string codegen_x86_statement(Statement statement) {
         "ret\n"
     );
 
-    out_format % codegen_x86_expression(statement.expression);
+    out_format % codegen_x86_expression(*statement.expression);
     std::string out = out_format.str();
     return out;
 }

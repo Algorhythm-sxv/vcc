@@ -21,6 +21,10 @@ class UnaryOp {
             throw std::runtime_error("invalid operator: " + tokens.front() + "\n");
         }
     }
+
+    UnaryOp(const UnaryOp&) = delete;
+    UnaryOp& operator=(const UnaryOp&) = delete;
+    ~UnaryOp() = default;
 };
 
 class Expression {
@@ -30,35 +34,29 @@ class Expression {
 
     std::string exp_type;
 
-    UnaryOp* unaryop;
-    Expression* expression;
+    std::shared_ptr<UnaryOp> unaryop;
+    std::shared_ptr<Expression> expression;
 
     Expression(std::list<std::string>& tokens) {
         if (!std::regex_match(tokens.front(), std::regex("[!~-]"))) {
             try {
                 exp_type = "const";
-                value = std::stoi(tokens.front(), 0);
+                value = std::stoi(tokens.front(), NULL, 0);
                 tokens.pop_front();
             } catch (...) {
                 throw std::runtime_error("invalid integer literal: " + tokens.front() + "\n");
             }
         } else {
-            unaryop = new UnaryOp(tokens);
-            expression = new Expression(tokens);
-        }
-    }
-
-    ~Expression() {
-        std::cout << "expression destructor called\n";
-        if (exp_type == "unary_op"){
-            delete unaryop;
-            delete expression;
+            exp_type = "unary_op";
+            unaryop = std::shared_ptr<UnaryOp>(new UnaryOp(tokens));
+            expression = std::shared_ptr<Expression>(new Expression(tokens));
         }
     }
 
     json jsonify() {
         json ast = {{"type", exp_type}};
         if (exp_type == "unary_op") {
+            ast["operation"] = unaryop->op;
             ast["expression"] = expression->jsonify();
         } else if (exp_type == "const"){
             ast["value"] = value;
@@ -71,8 +69,8 @@ class Expression {
 class Statement {
     public:
 
-    Expression* expression;
     std::string statement_type;
+    std::shared_ptr<Expression> expression;
 
     Statement(std::list<std::string>& tokens) {
         if (tokens.front() != "return") {
@@ -81,17 +79,12 @@ class Statement {
         statement_type = tokens.front();
         tokens.pop_front();
 
-        expression = new Expression(tokens);
+        expression = std::shared_ptr<Expression>(new Expression(tokens));
 
         if (tokens.front() != ";") {
             throw std::runtime_error("expected ';'\n");
         }
         tokens.pop_front();
-    }
-
-    ~Statement() {
-        std::cout << "Statement destructor called\n";
-        delete expression;
     }
 
     json jsonify() {
@@ -113,7 +106,7 @@ class Function {
     public:
     std::string return_type;
     std::string id;
-    std::list<Statement> statements;
+    std::list<std::shared_ptr<Statement>> statements;
 
     Function(std::list<std::string>& tokens) {
         if (tokens.front() != "int") {
@@ -143,7 +136,7 @@ class Function {
         }
         tokens.pop_front();
 
-        statements.push_back(Statement(tokens));
+        statements.push_back(std::shared_ptr<Statement>(new Statement(tokens)));
 
         if (tokens.front() != "}") {
             throw std::runtime_error("expected '}'\n");
@@ -158,11 +151,11 @@ class Function {
             {"return_type", return_type}
         };
 
-        std::list<Statement>::iterator it = statements.begin();
+        auto it = statements.begin();
 
         json statements_json;
         for (int i=0; i < statements.size(); i++) {
-            statements_json["statement" + std::to_string(i)] = it->jsonify();
+            statements_json["statement" + std::to_string(i)] = (*it)->jsonify();
             std::advance(it, 1);
         }
         ast["statements"] = statements_json;
@@ -174,10 +167,10 @@ class Function {
 class Program {
     public:
 
-    std::list<Function> functions;
+    std::list<std::shared_ptr<Function>> functions;
 
     Program(std::list<std::string>& tokens) {
-        functions.push_back(Function(tokens));
+        functions.push_back(std::shared_ptr<Function>(new Function(tokens)));
 
         if (tokens.size() > 0) {
             throw std::runtime_error("unexpected tokens after function definition\n");
@@ -187,11 +180,11 @@ class Program {
     json jsonify() {
 
         json ast;
-        std::list<Function>::iterator it = functions.begin();
+        auto it = functions.begin();
 
         for (int i=0; i < functions.size(); i++) {
-            json a = it->jsonify();
-            ast["function" + std::to_string(i)] = it->jsonify();
+            auto a = (*it)->jsonify();
+            ast["function" + std::to_string(i)] = (*it)->jsonify();
             std::advance(it, 1);
         }
 

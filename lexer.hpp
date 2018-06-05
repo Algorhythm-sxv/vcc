@@ -29,6 +29,9 @@ std::list<std::string> lex(std::ifstream& file) {
                                             "-",
                                             "!",
                                             "~",
+                                            "\\+",
+                                            "\\*",
+                                            "/",
                                             "[A-Za-z_]\\w*[^\\w]",   // identifiers
                                             "0[xX][0-9a-fA-f]+[^0-9a-fA-F]",    // hex literals
                                             "0[0-7]+[^0-7]",          // octal literals

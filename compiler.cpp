@@ -11,9 +11,9 @@ int main(int argc, char* argv[]) {
 
     std::list<std::string> tokens = lex(file);
 
-    Program prog(tokens);
+    auto prog = parse_program(tokens);
 
-    json ast = prog.jsonify();
+    json ast = jsonify_program(prog);
     std::cout << ast.dump(4);
 
     std::filebuf fb;

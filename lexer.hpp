@@ -25,17 +25,26 @@ std::list<std::string> lex(std::ifstream& file) {
                                             "return[^\\w]",
                                             "\\{", "\\}",
                                             "\\(", "\\)", 
+                                            "!=[\\S\\s]",
+                                            "==[\\S\\s]",
+                                            ">=[\\S\\s]",
+                                            "<=[\\S\\s]",
+                                            "<[^=]",
+                                            ">[^=]",
+                                            "\\|\\|[\\S\\s]",
+                                            "&&[\\S\\s]",
                                             ";",
-                                            "-",
-                                            "!",
+                                            "-[^=]",
+                                            "![^=]",
                                             "~",
-                                            "\\+",
-                                            "\\*",
-                                            "/",
-                                            "[A-Za-z_]\\w*[^\\w]",   // identifiers
+                                            "\\+[^=]",
+                                            "\\*[^=]",
+                                            "/[^=]",
+                                            "[A-Za-z_]\\w*[^\\w]",              // identifiers
                                             "0[xX][0-9a-fA-f]+[^0-9a-fA-F]",    // hex literals
-                                            "0[0-7]+[^0-7]",          // octal literals
-                                            "[1-9][0-9]*[^0-9]"};        // decimal literals
+                                            "0[^xX0-7]|0[0-7]+[^0-7]",          // octal and zero literals
+                                            "[1-9][0-9]*[^0-9]"                 // decimal literals
+    };        
 
     std::list<std::string> tokens = {};
     std::string candidate;

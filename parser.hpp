@@ -12,6 +12,10 @@ class Program;
 class Function;
 class Statement;
 class Expression;
+class ExpressionLogicAnd;
+class ExpressionEquality;
+class ExpressionRelational;
+class ExpressionAddSub;
 class Term; // sets operator precedence for binary +/-
 class Factor; // sets operator precedence for binary * & /, unary !/~/-
 
@@ -20,6 +24,10 @@ class Factor; // sets operator precedence for binary * & /, unary !/~/-
 std::shared_ptr<Function> parse_function(std::list<std::string>& tokens);
 std::shared_ptr<Statement> parse_statement(std::list<std::string>& tokens);
 std::shared_ptr<Expression> parse_expression(std::list<std::string>& tokens);
+std::shared_ptr<ExpressionLogicAnd> parse_expression_logic_and(std::list<std::string>& tokens);
+std::shared_ptr<ExpressionEquality> parse_expression_equality(std::list<std::string>& tokens);
+std::shared_ptr<ExpressionRelational> parse_expression_relational(std::list<std::string>& tokens);
+std::shared_ptr<ExpressionAddSub> parse_expression_add_sub(std::list<std::string>& tokens);
 std::shared_ptr<Term> parse_term(std::list<std::string>& tokens);
 std::shared_ptr<Factor> parse_factor(std::list<std::string>& tokens);
 
@@ -27,6 +35,10 @@ json jsonify_program(Program prog);
 json jsonify_function(std::shared_ptr<Function> fun);
 json jsonify_statement(std::shared_ptr<Statement> stat);
 json jsonify_expression(std::shared_ptr<Expression> exp);
+json jsonify_expression_logic_and(std::shared_ptr<ExpressionLogicAnd> exp);
+json jsonify_expression_equality(std::shared_ptr<ExpressionEquality> exp);
+json jsonify_expression_relational(std::shared_ptr<ExpressionRelational> exp);
+json jsonify_expression_add_sub(std::shared_ptr<ExpressionAddSub> exp);
 json jsonify_term(std::shared_ptr<Term> term);
 json jsonify_factor(std::shared_ptr<Factor> fac);
 
@@ -49,6 +61,28 @@ class Statement {
 };
 
 class Expression {
+    public:
+    std::list<std::shared_ptr<ExpressionLogicAnd>> expressions;
+};
+
+class ExpressionLogicAnd {
+    public:
+    std::list<std::shared_ptr<ExpressionEquality>> expressions;
+};
+
+class ExpressionEquality {
+    public:
+    std::list<std::shared_ptr<ExpressionRelational>> expressions;
+    std::list<std::string> operators;
+};
+
+class ExpressionRelational {
+    public:
+    std::list<std::shared_ptr<ExpressionAddSub>> expressions;
+    std::list<std::string> operators;
+};
+
+class ExpressionAddSub {
     public:
     std::list<std::shared_ptr<Term>> terms;
     std::list<std::string> operators;
@@ -185,6 +219,163 @@ json jsonify_statement(std::shared_ptr<Statement> stat) {
 
 std::shared_ptr<Expression> parse_expression(std::list<std::string>& tokens) {
     auto exp = std::shared_ptr<Expression>(new Expression);
+
+    exp->expressions.push_back(parse_expression_logic_and(tokens));
+
+    while (tokens.front() == "||") {
+        tokens.pop_front();
+
+        exp->expressions.push_back(parse_expression_logic_and(tokens));
+    }
+
+    return exp;
+}
+
+json jsonify_expression(std::shared_ptr<Expression> exp) {
+    json ast;
+
+    if (exp->expressions.size() == 1) {
+        auto expression = exp->expressions.front();
+        ast["expression"] = jsonify_expression_logic_and(expression);
+    } else {
+        json expressions_json;
+
+        auto expression = exp->expressions.begin();
+        expressions_json += jsonify_expression_logic_and(*expression);
+        std::advance(expression, 1);
+
+        for (int i=0; i<exp->expressions.size()-1; i++) {
+            expressions_json += "||";
+            expressions_json += jsonify_expression_logic_and(*expression);
+            std::advance(expression, 1);
+        }
+
+    }
+    return ast;
+}
+
+std::shared_ptr<ExpressionLogicAnd> parse_expression_logic_and(std::list<std::string>& tokens) {
+    auto exp = std::shared_ptr<ExpressionLogicAnd>(new ExpressionLogicAnd);
+
+    exp->expressions.push_back(parse_expression_equality(tokens));
+
+    while (tokens.front() == "&&") {
+        tokens.pop_front();
+
+        exp->expressions.push_back(parse_expression_equality(tokens));
+    }
+
+    return exp;
+}
+
+json jsonify_expression_logic_and(std::shared_ptr<ExpressionLogicAnd> exp) {
+    json ast;
+
+    if (exp->expressions.size() == 1) {
+        auto expression = exp->expressions.front();
+        ast["expression"] = jsonify_expression_equality(expression);
+    } else {
+        json expressions_json;
+
+        auto expression = exp->expressions.begin();
+        expressions_json += jsonify_expression_equality(*expression);
+        std::advance(expression, 1);
+
+        for (int i=0; i<exp->expressions.size()-1; i++) {
+            expressions_json += "&&";
+            expressions_json += jsonify_expression_equality(*expression);
+            std::advance(expression, 1);
+        }
+
+        ast["expressions"] = expressions_json;
+    }
+
+    return ast;
+}
+
+std::shared_ptr<ExpressionEquality> parse_expression_equality(std::list<std::string>& tokens) {
+    auto exp = std::shared_ptr<ExpressionEquality>(new ExpressionEquality);
+
+    exp->expressions.push_back(parse_expression_relational(tokens));
+
+    while (tokens.front() == "=="  ||  tokens.front() == "!=") {
+        exp->operators.push_back(tokens.front());
+        tokens.pop_front();
+
+        exp->expressions.push_back(parse_expression_relational(tokens));
+    }
+
+    return exp;
+}
+
+json jsonify_expression_equality(std::shared_ptr<ExpressionEquality> exp) {
+    json ast;
+
+    if (exp->expressions.size() == 1) {
+        auto expression = exp->expressions.front();
+        ast["expression"] = jsonify_expression_relational(expression);
+    } else {
+        auto expressions = exp->expressions.begin();
+        auto op = exp->operators.begin();
+
+        json expressions_json = {jsonify_expression_relational(*expressions)};
+        std::advance(expressions, 1);
+        for (int i=0; i<exp->operators.size(); i++) {
+            expressions_json += *op;
+            expressions_json += jsonify_expression_relational(*expressions);
+            std::advance(expressions, 1);
+            std::advance(op, 1);
+        }
+
+        ast["expressions"] = expressions_json;
+    }
+
+    return ast;
+}
+
+std::shared_ptr<ExpressionRelational> parse_expression_relational(std::list<std::string>& tokens) {
+    auto exp = std::shared_ptr<ExpressionRelational>(new ExpressionRelational);
+
+    exp->expressions.push_back(parse_expression_add_sub(tokens));
+
+    while (tokens.front() == ">"  ||  tokens.front() == "<" ||
+           tokens.front() == ">=" ||  tokens.front() == "<=") {
+        exp->operators.push_back(tokens.front());
+        tokens.pop_front();
+
+        exp->expressions.push_back(parse_expression_add_sub(tokens));
+    }
+
+    return exp;
+}
+
+json jsonify_expression_relational(std::shared_ptr<ExpressionRelational> exp) {
+    json ast;
+
+    if (exp->expressions.size() == 1) {
+        auto expression = exp->expressions.front();
+        ast["expression"] = jsonify_expression_add_sub(expression);
+    } else {
+        auto expressions = exp->expressions.begin();
+        auto op = exp->operators.begin();
+
+        json expressions_json = {jsonify_expression_add_sub(*expressions)};
+        std::advance(expressions, 1);
+        for (int i=0; i<exp->operators.size(); i++) {
+            expressions_json += *op;
+            expressions_json += jsonify_expression_add_sub(*expressions);
+            std::advance(expressions, 1);
+            std::advance(op, 1);
+        }
+
+        ast["expressions"] = expressions_json;
+    }
+
+    return ast;
+}
+
+std::shared_ptr<ExpressionAddSub> parse_expression_add_sub(std::list<std::string>& tokens) {
+    auto exp = std::shared_ptr<ExpressionAddSub>(new ExpressionAddSub);
     exp->terms.push_back(parse_term(tokens));
 
     while (tokens.front() == "+" || tokens.front() == "-") {
@@ -197,7 +388,7 @@ std::shared_ptr<Expression> parse_expression(std::list<std::string>& tokens) {
     return exp;
 }
 
-json jsonify_expression(std::shared_ptr<Expression> exp) {
+json jsonify_expression_add_sub(std::shared_ptr<ExpressionAddSub> exp) {
     json ast;
 
     if (exp->terms.size() == 1) {

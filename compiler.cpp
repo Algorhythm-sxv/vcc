@@ -14,7 +14,7 @@ int main(int argc, char* argv[]) {
     auto prog = parse_program(tokens);
 
     json ast = jsonify_program(prog);
-    std::cout << ast.dump(4);
+    std::cout << ast.dump(4) << "\n";
 
     std::filebuf fb;
     fb.open("out.s", std::ios::out);

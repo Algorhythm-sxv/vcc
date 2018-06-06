@@ -12,6 +12,15 @@ std::map<std::string, std::string> unary_ops = {
           "sete    %al\n"}
 };
 
+std::map<std::string, std::string> comparison_ops {
+    {">",  "setg    %al\n"},
+    {"<",  "setl    %al\n"},
+    {">=", "setge   %al\n"},
+    {"<=", "setle   %al\n"},
+    {"!=", "setne   %al\n"},
+    {"==", "sete    %al\n"}
+} ;
+
 std::map<std::string, std::string> binary_ops = {
 
 };
@@ -20,6 +29,10 @@ std::string codegen_x86_program(Program& program);
 std::string codegen_x86_function(std::shared_ptr<Function>& function);
 std::string codegen_x86_statement(std::shared_ptr<Statement>& statement);
 std::string codegen_x86_expression(std::shared_ptr<Expression>& expression);
+std::string codegen_x86_expression_logic_and(std::shared_ptr<ExpressionLogicAnd>& expression);
+std::string codegen_x86_expression_equality(std::shared_ptr<ExpressionEquality>& expression);
+std::string codegen_x86_expression_relational(std::shared_ptr<ExpressionRelational>& expression);
+std::string codegen_x86_expression_add_sub(std::shared_ptr<ExpressionAddSub>& expression);
 std::string codegen_x86_term(std::shared_ptr<Term>& term);
 std::string codegen_x86_factor(std::shared_ptr<Factor>& factor);
 
@@ -59,10 +72,111 @@ std::string codegen_x86_statement(std::shared_ptr<Statement>& statement) {
 }
 
 std::string codegen_x86_expression(std::shared_ptr<Expression>& expression) {
+    if (expression->expressions.size() == 1) {
+        return codegen_x86_expression_logic_and(expression->expressions.front());
+    } else {
+        std::string out = codegen_x86_expression_logic_and(
+            expression->expressions.front());                   // asm for first operand
+        std::string base_format_str = "push    %%eax\n"         // push first operand to stack
+                                      "%s"                      // asm for second operand
+                                      "pop     %%ecx\n"         // pop first operand to ecx
+                                      "orl     %%ecx, %%eax\n"  // compute first operand | second operand, sets FLAGS
+                                      "movl    $0, %%eax\n"     // zero-out eax
+                                      "setne   %%al\n";         // set al to 1 iff first|second != 0
+
+        for (auto expr: expression->expressions) {
+            boost::format format_str(base_format_str);
+            format_str % codegen_x86_expression_logic_and(expr);
+            out += format_str.str();
+        }
+
+        return out;
+    }
+}
+
+std::string codegen_x86_expression_logic_and(std::shared_ptr<ExpressionLogicAnd>& expression) {
+    if (expression->expressions.size() == 1) {
+        return codegen_x86_expression_equality(expression->expressions.front());
+    } else {
+        std::string out = codegen_x86_expression_equality(
+            expression->expressions.front());                   // asm for first operand
+        std::string base_format_str = "push    %%eax\n"         // push first operand to stack
+                                      "%s"                      // asm for second operand
+                                      "pop     %%ecx\n"         // pop first operand to ecx
+                                      "cmpl    $0, %%ecx\n"     // compare first operand to 0
+                                      "setne   %%cl\n"          // set cl to 1 iff first operand != 0
+                                      "cmpl    $0, %%eax\n"     // compare second operand to 0
+                                      "setne   %%al\n"          // set al to 1 iff second operand !=0
+                                      "andb    %%cl, %%al\n";   // set al to al & cl
+
+        for (auto expr: expression->expressions) {
+            boost::format format_str(base_format_str);
+            format_str % codegen_x86_expression_equality(expr);
+            out += format_str.str();
+        }
+
+        return out;
+    }
+}
+
+std::string codegen_x86_expression_equality(std::shared_ptr<ExpressionEquality>& expression) {
+    if (expression->expressions.size() == 1) {
+        return codegen_x86_expression_relational(expression->expressions.front());
+    } else {
+        std::string out = codegen_x86_expression_relational(
+            expression->expressions.front());                    // asm for first operand
+        std::string base_format_str = "push    %%eax\n"         // push first oeprand to stack
+                                      "%s"                      // asm for second operand
+                                      "pop     %%ecx\n"         // pop first operand to ecx
+                                      "cmpl    %%eax, %%ecx\n"  // compare first operand to second operand and set FLAGS
+                                      "movl    $0, %%eax\n"     // zero-out eax
+                                      "%s";                     // asm for comparison
+
+        auto expr = expression->expressions.begin();
+        std::advance(expr, 1);
+        for (auto op: expression->operators) {
+            boost::format format_str(base_format_str);
+            format_str % codegen_x86_expression_relational(*expr) % comparison_ops[op];
+            out += format_str.str();
+            std::advance(expr, 1);
+        }
+
+        return out;
+    }
+}
+
+std::string codegen_x86_expression_relational(std::shared_ptr<ExpressionRelational>& expression) {
+    if (expression->expressions.size() == 1) {
+        return codegen_x86_expression_add_sub(expression->expressions.front());
+    } else {
+        std::string out = codegen_x86_expression_add_sub(
+            expression->expressions.front());                   // asm for first operand
+        std::string base_format_str = "push    %%eax\n"         // push first oeprand to stack
+                                      "%s"                      // asm for second operand
+                                      "pop     %%ecx\n"         // pop first operand to ecx
+                                      "cmpl    %%eax, %%ecx\n"  // compares first operand to second operand and sets FLAGS
+                                      "movl    $0, %%eax\n"     // zero-out eax
+                                      "%s";                     // asm for comparison
+
+        auto expr = expression->expressions.begin();
+        std::advance(expr, 1);
+        for (auto op: expression->operators) {
+            boost::format format_str(base_format_str);
+            format_str % codegen_x86_expression_add_sub(*expr) % comparison_ops[op];
+            out += format_str.str();
+            std::advance(expr, 1);
+        }
+
+        return out;
+    }
+}
+
+std::string codegen_x86_expression_add_sub(std::shared_ptr<ExpressionAddSub>& expression) {
     if (expression->terms.size() == 1) {
         return codegen_x86_term(expression->terms.front());
     } else {
-        std::string format_str = "%s";                          // asm for first operand (stored in eax)
+        std::string out = 
+            codegen_x86_term(expression->terms.front());        // asm for first operand (stored in eax)
         std::string add_format_str = "push    %%eax\n"          // push first operand to stack
                                      "%s"                       // asm for second operand
                                      "pop     %%ecx\n"          // pop first operand to ecx
@@ -74,21 +188,22 @@ std::string codegen_x86_expression(std::shared_ptr<Expression>& expression) {
                                      "pop     %%eax\n"          // pop first operand to eax
                                      "subl    %%ecx, %%eax\n";  // compute eax - ecx and store in eax
 
+        auto term = expression->terms.begin();
+        std::advance(term, 1);
         for (auto op: expression->operators) {
             if (op == "+") {
-                format_str += add_format_str;
+                boost::format format_str(add_format_str);
+                format_str % codegen_x86_term(*term);
+                out += format_str.str();
             } else { // if (op == "-") {
-                format_str += sub_format_str;
+                boost::format format_str(sub_format_str);
+                format_str % codegen_x86_term(*term);
+                out += format_str.str();
             }
+            std::advance(term, 1);
         }
 
-        boost::format out_format(format_str);
-
-        for (auto term: expression->terms){
-            out_format % codegen_x86_term(term);
-        }
-
-        return out_format.str();
+        return out;
     }
 }
 
@@ -96,7 +211,8 @@ std::string codegen_x86_term(std::shared_ptr<Term>& term) {
     if (term->factors.size() == 1) {
         return codegen_x86_factor(term->factors.front());
     } else {
-        std::string format_str = "%s";                          // asm for first operand (stored in eax)
+        std::string out = 
+            codegen_x86_factor(term->factors.front());           // asm for first operand (stored in eax)
         std::string mul_format_str = "push    %%eax\n"          // push first operand to stack
                                      "%s"                       // asm for second operand (stored in eax)
                                      "pop     %%ecx\n"          // pop first operand to ecx
@@ -109,21 +225,21 @@ std::string codegen_x86_term(std::shared_ptr<Term>& term) {
                                      "movl    $0, %%edx\n"      // zero out edx
                                      "idivl   %%ecx\n";         // compute [edx:eax]/ecx, quotient goes to eax, remainder to edx
 
+        auto factor = term->factors.begin();
+        std::advance(factor, 1);
         for (auto op: term->operators) {
             if (op == "*") {
-                format_str += mul_format_str;
+                boost::format format_str(mul_format_str);
+                format_str % codegen_x86_factor(*factor);
+                out += format_str.str();
             } else { // if (*op == "/") {
-                format_str += div_format_str;
+                boost::format format_str(div_format_str);
+                format_str % codegen_x86_factor(*factor);
             }
+            std::advance(factor, 1);
         }
 
-        boost::format out_format(format_str);
-
-        for (auto factor: term->factors){
-            out_format % codegen_x86_factor(factor);
-        }
-
-        return out_format.str();
+        return out;
     }
 }
 

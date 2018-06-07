@@ -21,25 +21,31 @@
 #include <string>
 
 std::list<std::string> lex(std::ifstream& file) {
-    std::list<std::string> token_regexes = {"int[^\\w]",
-                                            "return[^\\w]",
-                                            "\\{", "\\}",
-                                            "\\(", "\\)", 
-                                            "!=[\\S\\s]",
-                                            "==[\\S\\s]",
-                                            ">=[\\S\\s]",
-                                            "<=[\\S\\s]",
-                                            "<[^=]",
-                                            ">[^=]",
-                                            "\\|\\|[\\S\\s]",
-                                            "&&[\\S\\s]",
-                                            ";",
-                                            "-[^=]",
-                                            "![^=]",
-                                            "~",
-                                            "\\+[^=]",
-                                            "\\*[^=]",
-                                            "/[^=]",
+    std::list<std::string> token_regexes = {"int[^\\w]",                        // int keyword
+                                            "return[^\\w]",                     // return keyword
+                                            "\\{", "\\}",                       // braces
+                                            "\\(", "\\)",                       // brackets
+                                            "!=[\\S\\s]",                       // not equal comparison
+                                            "==[\\S\\s]",                       // equal comparison
+                                            ">=[\\S\\s]",                       // greater or equal comparison
+                                            "<=[\\S\\s]",                       // lesser or equal comparison
+                                            ">[^=>]",                           // greater comparison
+                                            "<[^=<]",                           // lesser comparison
+                                            "\\|[^\\|]",                        // bitwise OR
+                                            "\\^",                              // bitwise XOR
+                                            "&[^&]",                            // bitwise AND
+                                            "\\|\\|[\\S\\s]",                   // logical OR
+                                            "&&[\\S\\s]",                       // logical AND
+                                            ";",                                // semicolon
+                                            "<<[\\S\\s]",                       // left shift
+                                            ">>[\\S\\S]",                       // right shift
+                                            "\\+[^=]",                          // addition
+                                            "\\*[^=]",                          // multiplication
+                                            "/[^=]",                            // division
+                                            "%",                                // modulo
+                                            "-[^=]",                            // subtraction / negation
+                                            "![^=]",                            // logical NOT
+                                            "~[^=]",                            // bitwise NOT
                                             "[A-Za-z_]\\w*[^\\w]",              // identifiers
                                             "0[xX][0-9a-fA-f]+[^0-9a-fA-F]",    // hex literals
                                             "0[^xX0-7]|0[0-7]+[^0-7]",          // octal and zero literals

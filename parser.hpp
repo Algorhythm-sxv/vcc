@@ -1,3 +1,18 @@
+// <program> ::= <function>
+// <function> ::= "int" <id> "(" ")" "{" { <statement> } "}"
+// <statement> ::= "return" <exp> ";"
+//               | <exp> ";"
+//               | "int" <id> [ = <exp>] ";" 
+// <exp> ::= <id> "=" <exp> | <logical-or-exp>
+// <logical-or-exp> ::= <logical-and-exp> { "||" <logical-and-exp> } 
+// <logical-and-exp> ::= <equality-exp> { "&&" <equality-exp> }
+// <equality-exp> ::= <relational-exp> { ("!=" | "==") <relational-exp> }
+// <relational-exp> ::= <additive-exp> { ("<" | ">" | "<=" | ">=") <additive-exp> }
+// <additive-exp> ::= <term> { ("+" | "-") <term> }
+// <term> ::= <factor> { ("*" | "/") <factor> }
+// <factor> ::= "(" <exp> ")" | <unary_op> <factor> | <int> | <id>
+// <unary_op> ::= "!" | "~" | "-"
+
 #ifndef parser
 #include <list>
 #include <regex>
@@ -12,6 +27,8 @@ class Program;
 class Function;
 class Statement;
 class Expression;
+class ExpressionAssignment;
+class ExpressionLogicOr;
 class ExpressionLogicAnd;
 class ExpressionBitwiseOr;
 class ExpressionBitwiseXor;
@@ -28,6 +45,8 @@ class Factor; // sets operator precedence for binary * & /, unary !/~/-
 std::shared_ptr<Function> parse_function(std::list<std::string>& tokens);
 std::shared_ptr<Statement> parse_statement(std::list<std::string>& tokens);
 std::shared_ptr<Expression> parse_expression(std::list<std::string>& tokens);
+std::shared_ptr<ExpressionAssignment> parse_expression_assignment(std::list<std::string>& tokens);
+std::shared_ptr<ExpressionLogicOr> parse_expression_logic_or(std::list<std::string>& tokens);
 std::shared_ptr<ExpressionLogicAnd> parse_expression_logic_and(std::list<std::string>& tokens);
 std::shared_ptr<ExpressionBitwiseOr> parse_expression_bitwise_or(std::list<std::string>& tokens);
 std::shared_ptr<ExpressionBitwiseXor> parse_expression_bitwise_xor(std::list<std::string>& tokens);
@@ -39,20 +58,22 @@ std::shared_ptr<ExpressionAddSub> parse_expression_add_sub(std::list<std::string
 std::shared_ptr<Term> parse_term(std::list<std::string>& tokens);
 std::shared_ptr<Factor> parse_factor(std::list<std::string>& tokens);
 
-json jsonify_program(Program prog);
-json jsonify_function(std::shared_ptr<Function> fun);
-json jsonify_statement(std::shared_ptr<Statement> stat);
-json jsonify_expression(std::shared_ptr<Expression> exp);
-json jsonify_expression_logic_and(std::shared_ptr<ExpressionLogicAnd> exp);
-json jsonify_expression_bitwise_or(std::shared_ptr<ExpressionBitwiseOr> exp);
-json jsonify_expression_bitwise_xor(std::shared_ptr<ExpressionBitwiseXor> exp);
-json jsonify_expression_bitwise_and(std::shared_ptr<ExpressionBitwiseAnd> exp);
-json jsonify_expression_equality(std::shared_ptr<ExpressionEquality> exp);
-json jsonify_expression_relational(std::shared_ptr<ExpressionRelational> exp);
-json jsonify_expression_shift(std::shared_ptr<ExpressionShift> exp);
-json jsonify_expression_add_sub(std::shared_ptr<ExpressionAddSub> exp);
-json jsonify_term(std::shared_ptr<Term> term);
-json jsonify_factor(std::shared_ptr<Factor> fac);
+json jsonify_program(Program& prog);
+json jsonify_function(std::shared_ptr<Function>& fun);
+json jsonify_statement(std::shared_ptr<Statement>& stat);
+json jsonify_expression(std::shared_ptr<Expression>& exp);
+json jsonify_expression_assignment(std::shared_ptr<ExpressionAssignment>& exp);
+json jsonify_expression_logic_or(std::shared_ptr<ExpressionLogicOr>& exp);
+json jsonify_expression_logic_and(std::shared_ptr<ExpressionLogicAnd>& exp);
+json jsonify_expression_bitwise_or(std::shared_ptr<ExpressionBitwiseOr>& exp);
+json jsonify_expression_bitwise_xor(std::shared_ptr<ExpressionBitwiseXor>& exp);
+json jsonify_expression_bitwise_and(std::shared_ptr<ExpressionBitwiseAnd>& exp);
+json jsonify_expression_equality(std::shared_ptr<ExpressionEquality>& exp);
+json jsonify_expression_relational(std::shared_ptr<ExpressionRelational>& exp);
+json jsonify_expression_shift(std::shared_ptr<ExpressionShift>& exp);
+json jsonify_expression_add_sub(std::shared_ptr<ExpressionAddSub>& exp);
+json jsonify_term(std::shared_ptr<Term>& term);
+json jsonify_factor(std::shared_ptr<Factor>& fac);
 
 class Program {
     public:
@@ -69,10 +90,27 @@ class Function {
 class Statement {
     public:
     std::string statement_type;
+    std::string declaration_type;
+    std::string declaration_id;
+    bool initialised = false;
     std::shared_ptr<Expression> expression;
 };
 
 class Expression {
+    public:
+    std::list<std::shared_ptr<ExpressionAssignment>> expressions;
+};
+
+class ExpressionAssignment {
+    public:
+    std::string exp_type;
+    std::string assign_id;
+    std::string assign_type;
+    std::shared_ptr<ExpressionAssignment> assign_exp;
+    std::shared_ptr<ExpressionLogicOr> expression;
+};
+
+class ExpressionLogicOr {
     public:
     std::list<std::shared_ptr<ExpressionLogicAnd>> expressions;
 };
@@ -130,9 +168,10 @@ class Term {
 class Factor {
     public:
     std::string factor_type;
-    std::string unaryop;
     std::shared_ptr<Expression> expression;
+    std::string unaryop;
     std::shared_ptr<Factor> factor;
+    std::string id;
     int value;
 };
 
@@ -146,7 +185,7 @@ Program parse_program(std::list<std::string> tokens) {
 
     return prog;
 }
-json jsonify_program(Program prog) {
+json jsonify_program(Program& prog) {
     json ast;
     auto it = prog.functions.begin();
 
@@ -188,17 +227,15 @@ std::shared_ptr<Function> parse_function(std::list<std::string>& tokens) {
     }
     tokens.pop_front();
 
-    fun->statements.push_back(parse_statement(tokens));
-
-    if (tokens.front() != "}") {
-        throw std::runtime_error("expected '}'\n");
+    while (tokens.front() != "}") {
+        fun->statements.push_back(parse_statement(tokens));
     }
     tokens.pop_front();
 
     return fun;
 }
 
-json jsonify_function(std::shared_ptr<Function> fun) {
+json jsonify_function(std::shared_ptr<Function>& fun) {
     json ast = {
         {"identifier", fun->id},
         {"return_type", fun->return_type}
@@ -218,37 +255,135 @@ json jsonify_function(std::shared_ptr<Function> fun) {
 
 std::shared_ptr<Statement> parse_statement(std::list<std::string>& tokens) {
     auto stat = std::shared_ptr<Statement>(new Statement);
-    if (tokens.front() != "return") {
-        throw std::runtime_error("invalid statement: " + tokens.front() + "\n");
+    if (tokens.front() == "return") {
+        stat->statement_type = "return";
+        tokens.pop_front();
+
+        stat->expression = parse_expression(tokens);
+
+        if (tokens.front() != ";") {
+            throw std::runtime_error("expected ';'\n");
+        }
+        tokens.pop_front();
+
+    } else if (tokens.front() == "int") {
+        stat->statement_type = "variable_declaration";
+        stat->declaration_type = tokens.front();
+        tokens.pop_front();
+
+        stat->declaration_id = tokens.front();
+        tokens.pop_front();
+
+        if (tokens.front() == "=") {
+            stat->initialised = true;
+            tokens.pop_front();
+            stat->expression = parse_expression(tokens);
+        }
+
+        if (tokens.front() != ";") {
+            throw std::runtime_error("expected ';'\n");
+        }
+        tokens.pop_front();
+
+    } else {
+        stat->statement_type = "expression";
+        stat->expression = parse_expression(tokens);
+        if (tokens.front() != ";") {
+            throw std::runtime_error("expected ';'\n");
+        }
+        tokens.pop_front();
     }
-    stat->statement_type = tokens.front();
-    tokens.pop_front();
-
-    stat->expression = parse_expression(tokens);
-
-    if (tokens.front() != ";") {
-        throw std::runtime_error("expected ';'\n");
-    }
-    tokens.pop_front();
-
     return stat;
 }
 
-json jsonify_statement(std::shared_ptr<Statement> stat) {
+json jsonify_statement(std::shared_ptr<Statement>& stat) {
     json ast = {{"type", stat->statement_type}};
-    // std::list<Expression>::iterator it = expressions.begin();
 
-    // json expressions_json;
-    // for (int i=0; i < expressions.size(); i++) {
-    //     expressions_json["expression" + std::to_string(i)] = it->jsonify();
-    //     std::advance(it, 1);
-    // }
-    ast["expression"] = jsonify_expression(stat->expression);
+    if (stat->statement_type == "variable_declaration") {
+        ast["id"] = stat->declaration_id;
+        ast["initialised"] = stat->initialised? "true": "false";
+        ast["expression"] = jsonify_expression(stat->expression);
+
+    } else {
+        ast["expression"] = jsonify_expression(stat->expression);
+    }
     return ast;
 }
 
 std::shared_ptr<Expression> parse_expression(std::list<std::string>& tokens) {
     auto exp = std::shared_ptr<Expression>(new Expression);
+
+    exp->expressions.push_back(parse_expression_assignment(tokens));
+
+    while (tokens.front() == ",") {
+        tokens.pop_front();
+        exp->expressions.push_back(parse_expression_assignment(tokens));
+    }
+    return exp;
+}
+
+json jsonify_expression(std::shared_ptr<Expression>& exp) {
+    json ast;
+    ast += jsonify_expression_assignment(exp->expressions.front());
+    auto expression = exp->expressions.begin();
+    std::advance(expression, 1);
+    for (int i=0; i<exp->expressions.size()-1;i++) {
+        ast += ",";
+        ast += jsonify_expression_assignment(*expression);
+        std::advance(expression, 1);
+    }
+    return ast;
+}
+
+std::shared_ptr<ExpressionAssignment> parse_expression_assignment(std::list<std::string>& tokens) {
+    auto exp = std::shared_ptr<ExpressionAssignment>(new ExpressionAssignment);
+
+    if (std::regex_match(tokens.front(), std::regex("[A-Za-z_]\\w*"))) {
+        auto id = tokens.front();
+
+        auto token = std::next(tokens.begin());
+
+        auto t = *token;
+
+        if (t=="="||t=="+="||t=="-="||t=="*="||t=="/="||t=="%="||t=="&="||t=="^="||t=="|="||t=="<<="||t==">>=") {
+            exp->exp_type = "assignment";
+            exp->assign_id = id;
+            exp->assign_type = t;
+            tokens.pop_front();
+            tokens.pop_front();
+
+            exp->assign_exp = parse_expression_assignment(tokens);
+
+        } else {
+            exp->exp_type = "logic_or";
+            exp->expression = parse_expression_logic_or(tokens);
+        }
+        return exp;
+
+    } else {
+        exp->exp_type = "logic_or";
+        exp->expression = parse_expression_logic_or(tokens);
+
+        return exp;
+    }
+}
+
+json jsonify_expression_assignment(std::shared_ptr<ExpressionAssignment>& exp) {
+    if (exp->exp_type == "logic_or") {
+        return jsonify_expression_logic_or(exp->expression);
+    } else { // if (exp->exp_type == "assignment") {
+        json ast = {{"type", exp->exp_type}};
+
+        ast["id"] = exp->assign_id;
+        ast["assign_type"] = exp->assign_type;
+        ast["expression"] = jsonify_expression_assignment(exp->assign_exp);
+
+        return ast;
+    }
+}
+
+std::shared_ptr<ExpressionLogicOr> parse_expression_logic_or(std::list<std::string>& tokens) {
+    auto exp = std::shared_ptr<ExpressionLogicOr>(new ExpressionLogicOr);
 
     exp->expressions.push_back(parse_expression_logic_and(tokens));
 
@@ -257,15 +392,15 @@ std::shared_ptr<Expression> parse_expression(std::list<std::string>& tokens) {
 
         exp->expressions.push_back(parse_expression_logic_and(tokens));
     }
-
     return exp;
 }
 
-json jsonify_expression(std::shared_ptr<Expression> exp) {
+json jsonify_expression_logic_or(std::shared_ptr<ExpressionLogicOr>& exp) {
     if (exp->expressions.size() == 1) {
         return jsonify_expression_logic_and(exp->expressions.front());
     } else {
         json ast;
+
         json expressions_json;
 
         auto expression = exp->expressions.begin();
@@ -293,11 +428,10 @@ std::shared_ptr<ExpressionLogicAnd> parse_expression_logic_and(std::list<std::st
 
         exp->expressions.push_back(parse_expression_bitwise_or(tokens));
     }
-
     return exp;
 }
 
-json jsonify_expression_logic_and(std::shared_ptr<ExpressionLogicAnd> exp) {
+json jsonify_expression_logic_and(std::shared_ptr<ExpressionLogicAnd>& exp) {
     if (exp->expressions.size() == 1) {
         return jsonify_expression_bitwise_or(exp->expressions.front());
     } else {
@@ -334,7 +468,7 @@ std::shared_ptr<ExpressionBitwiseOr> parse_expression_bitwise_or(std::list<std::
     return exp;
 }
 
-json jsonify_expression_bitwise_or(std::shared_ptr<ExpressionBitwiseOr> exp) {
+json jsonify_expression_bitwise_or(std::shared_ptr<ExpressionBitwiseOr>& exp) {
     if (exp->expressions.size() == 1) {
         return jsonify_expression_bitwise_xor(exp->expressions.front());
     } else {
@@ -371,7 +505,7 @@ std::shared_ptr<ExpressionBitwiseXor> parse_expression_bitwise_xor(std::list<std
     return exp;
 }
 
-json jsonify_expression_bitwise_xor(std::shared_ptr<ExpressionBitwiseXor> exp) {
+json jsonify_expression_bitwise_xor(std::shared_ptr<ExpressionBitwiseXor>& exp) {
     if (exp->expressions.size() == 1) {
         return jsonify_expression_bitwise_and(exp->expressions.front());
     } else {
@@ -408,7 +542,7 @@ std::shared_ptr<ExpressionBitwiseAnd> parse_expression_bitwise_and(std::list<std
     return exp;
 }
 
-json jsonify_expression_bitwise_and(std::shared_ptr<ExpressionBitwiseAnd> exp) {
+json jsonify_expression_bitwise_and(std::shared_ptr<ExpressionBitwiseAnd>& exp) {
     if (exp->expressions.size() == 1) {
         return jsonify_expression_equality(exp->expressions.front());
     } else {
@@ -446,7 +580,7 @@ std::shared_ptr<ExpressionEquality> parse_expression_equality(std::list<std::str
     return exp;
 }
 
-json jsonify_expression_equality(std::shared_ptr<ExpressionEquality> exp) {
+json jsonify_expression_equality(std::shared_ptr<ExpressionEquality>& exp) {
     if (exp->expressions.size() == 1) {
         return jsonify_expression_relational(exp->expressions.front());
     } else {
@@ -485,7 +619,7 @@ std::shared_ptr<ExpressionRelational> parse_expression_relational(std::list<std:
     return exp;
 }
 
-json jsonify_expression_relational(std::shared_ptr<ExpressionRelational> exp) {
+json jsonify_expression_relational(std::shared_ptr<ExpressionRelational>& exp) {
     if (exp->expressions.size() == 1) {
         return jsonify_expression_shift(exp->expressions.front());
     } else {
@@ -522,7 +656,7 @@ std::shared_ptr<ExpressionShift> parse_expression_shift(std::list<std::string>& 
     return exp;
 }
 
-json jsonify_expression_shift(std::shared_ptr<ExpressionShift> exp) {
+json jsonify_expression_shift(std::shared_ptr<ExpressionShift>& exp) {
     if (exp->expressions.size() == 1) {
         return jsonify_expression_add_sub(exp->expressions.front());
     } else {
@@ -559,7 +693,7 @@ std::shared_ptr<ExpressionAddSub> parse_expression_add_sub(std::list<std::string
     return exp;
 }
 
-json jsonify_expression_add_sub(std::shared_ptr<ExpressionAddSub> exp) {
+json jsonify_expression_add_sub(std::shared_ptr<ExpressionAddSub>& exp) {
     if (exp->terms.size() == 1) {
         return jsonify_term(exp->terms.front());
     } else {
@@ -591,11 +725,10 @@ std::shared_ptr<Term> parse_term(std::list<std::string>& tokens) {
 
         term->factors.push_back(parse_factor(tokens));
     }
-
     return term;
 }
 
-json jsonify_term(std::shared_ptr<Term> term) {
+json jsonify_term(std::shared_ptr<Term>& term) {
     if (term->factors.size() == 1) {
         return jsonify_factor(term->factors.front());
     } else {
@@ -615,7 +748,6 @@ json jsonify_term(std::shared_ptr<Term> term) {
 
         return ast;
     }
-
 }
 
 std::shared_ptr<Factor> parse_factor(std::list<std::string>& tokens) {
@@ -629,12 +761,29 @@ std::shared_ptr<Factor> parse_factor(std::list<std::string>& tokens) {
             throw std::runtime_error("missing ')' after '('\n");
         }
         tokens.pop_front();
-    } else if (std::regex_match(tokens.front(), std::regex("[!~-]"))) {
+    } else if (std::regex_match(tokens.front(), std::regex("[!~-]|\\+\\+|--"))) {
         fac->factor_type = "unary_op";
         fac->unaryop = tokens.front();
         tokens.pop_front();
         fac->factor = parse_factor(tokens);
+    } else if (std::regex_match(tokens.front(), std::regex("[A-Za-z_][\\w]*"))) {
+        auto id = tokens.front();
+        tokens.pop_front();
+        if (tokens.front() == "++" || tokens.front() == "--") {
+            fac->factor_type = "unary_op";
+            fac->unaryop = tokens.front();
+            tokens.pop_front();
+
+            tokens.push_front(id);
+            fac->factor = parse_factor(tokens);
+        } else {
+            fac->factor_type = "variable";
+            fac->id = id;
+        }
     } else {
+        if (tokens.front() == "+") {
+            tokens.pop_front();
+        }
         try {
             fac->factor_type = "const";
             fac->value = std::stoi(tokens.front(), NULL, 0);
@@ -643,11 +792,10 @@ std::shared_ptr<Factor> parse_factor(std::list<std::string>& tokens) {
             throw std::runtime_error("invalid integer literal: " + tokens.front() + "\n");
         }
     }
-
     return fac;
 }
 
-json jsonify_factor(std::shared_ptr<Factor> fac) {
+json jsonify_factor(std::shared_ptr<Factor>& fac) {
     json ast = {{"type", fac->factor_type}};
 
     if (fac->factor_type == "bracket_expression") {
@@ -655,10 +803,11 @@ json jsonify_factor(std::shared_ptr<Factor> fac) {
     } else if (fac->factor_type == "unary_op") {
         ast["operation"] = fac->unaryop;
         ast["factor"] = jsonify_factor(fac->factor);
-    } else {
+    } else if (fac->factor_type == "const") {
         ast["value"] = fac->value;
+    } else {
+        ast["id"] = fac->id;
     }
-
     return ast;
 }
 

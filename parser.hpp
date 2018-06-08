@@ -302,7 +302,9 @@ json jsonify_statement(std::shared_ptr<Statement>& stat) {
     if (stat->statement_type == "variable_declaration") {
         ast["id"] = stat->declaration_id;
         ast["initialised"] = stat->initialised? "true": "false";
-        ast["expression"] = jsonify_expression(stat->expression);
+        if (stat->initialised) {
+            ast["expression"] = jsonify_expression(stat->expression);
+        }
 
     } else {
         ast["expression"] = jsonify_expression(stat->expression);

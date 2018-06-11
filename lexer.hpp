@@ -9,6 +9,8 @@ std::list<std::string> lex(std::ifstream& file) {
                                             // Keywords and grouping
                                             "int[^\\w]",                        // int keyword
                                             "return[^\\w]",                     // return keyword
+                                            "if[^\\w]",                         // if keyword
+                                            "else[\\w]",                        // else keyword
                                             "\\{", "\\}",                       // braces
 
                                             // Operators (in order of precedence)
@@ -27,7 +29,7 @@ std::list<std::string> lex(std::ifstream& file) {
                                             "/[^=]",                            // division
                                             "%[^=]",                            // modulo
 
-                                            "\\+[^=+]",                          // addition
+                                            "\\+[^=+]",                         // addition
                                             "-[^=]",                            // subtraction
 
                                             "<<[^=]",                           // left shift
@@ -67,6 +69,8 @@ std::list<std::string> lex(std::ifstream& file) {
 
                                             // Other
                                             ";",                                // semicolon
+                                            ":",                                // colon
+                                            "\\?",                              // question mark
                                             "[A-Za-z_]\\w*[^\\w]",              // identifiers
                                             "0[xX][0-9a-fA-f]+[^0-9a-fA-F]",    // hex literals
                                             "0[^xX0-7]|0[0-7]+[^0-7]",          // octal and zero literals
@@ -88,16 +92,20 @@ std::list<std::string> lex(std::ifstream& file) {
         
         bool regex_matched = false;
         for (std::string re : token_regexes) {
-            if (std::regex_match(candidate + std::string(1,c), std::regex(re))) {
-                regex_matched = true;
-                if (candidate.length() >= 1) {
-                    tokens.push_back(candidate);
-                    candidate = "";
-                } else {
-                    tokens.push_back(std::string(1, c));
-                    file.get(c);
+            try {
+                if (std::regex_match(candidate + std::string(1,c), std::regex(re))) {
+                    regex_matched = true;
+                    if (candidate.length() >= 1) {
+                        tokens.push_back(candidate);
+                        candidate = "";
+                    } else {
+                        tokens.push_back(std::string(1, c));
+                        file.get(c);
+                    }
+                    break;
                 }
-                break;
+            } catch (std::regex_error) {
+                throw std::runtime_error("bad regex in lexer: " + re + "\n");
             }
         }
         if (!regex_matched) {

@@ -7,7 +7,7 @@
 //               | "if" "(" <exp> ")" <statement> [ "else" <statement> ]
 //               | "{" { <block-item> } "}"
 
-// <exp> ::= <assignment-exp> { "," <assignment-exp> }
+// <exp> ::= <assignment-exp> { "," <assignment-exp> } | None
 // <assignment-exp> ::= <id> "=" <exp> | <conditional-exp>
 // <conditional-exp> ::= <logical-or-exp> "?" <exp> ":" <conditional-exp>
 // <logical-or-exp> ::= <logical-and-exp> { "||" <logical-and-exp> }
@@ -112,14 +112,17 @@ class BlockItem {
 class Statement {
     public:
     std::string statement_type;
-    std::shared_ptr<Expression> expression;
-    std::shared_ptr<Statement> if_statement;
-    std::shared_ptr<Statement> else_statement;
+    std::shared_ptr<Expression> expression1;
+    std::shared_ptr<Statement> statement1;
+    std::shared_ptr<Statement> statement2;
+    std::shared_ptr<Expression> expression2;
+    std::shared_ptr<Expression> expression3;
     std::list<std::shared_ptr<BlockItem>> items;
 };
 
 class Expression {
     public:
+    std::string exp_type;
     std::list<std::shared_ptr<ExpressionAssignment>> expressions;
 };
 
@@ -333,7 +336,7 @@ std::shared_ptr<Statement> parse_statement(std::list<std::string>& tokens) {
         stat->statement_type = "return";
         tokens.pop_front();
 
-        stat->expression = parse_expression(tokens);
+        stat->expression1 = parse_expression(tokens);
 
         if (tokens.front() != ";") {
             throw std::runtime_error("expected ';'\n");
@@ -341,7 +344,6 @@ std::shared_ptr<Statement> parse_statement(std::list<std::string>& tokens) {
         tokens.pop_front();
     } else if (tokens.front() == "if") {
         stat->statement_type = "conditional";
-
         tokens.pop_front();
 
         if (tokens.front() != "(") {
@@ -349,21 +351,118 @@ std::shared_ptr<Statement> parse_statement(std::list<std::string>& tokens) {
         }
         tokens.pop_front();
 
-        stat->expression = parse_expression(tokens);
+        stat->expression1 = parse_expression(tokens);
 
         if (tokens.front() != ")") {
             throw std::runtime_error("expected ')' in if statement\n");
         }
         tokens.pop_front();
 
-        stat->if_statement = parse_statement(tokens);
+        stat->statement1 = parse_statement(tokens);
 
         if (tokens.front() == "else") {
             tokens.pop_front();
-            stat->else_statement = parse_statement(tokens);
+            stat->statement2 = parse_statement(tokens);
         }
     } else if (tokens.front() == "else") {
         throw std::runtime_error("'else' statement has no parent 'if' statement\n");
+
+    } else if (tokens.front() == "for") {
+        tokens.pop_front();
+
+        if (tokens.front() != "(") {
+            throw std::runtime_error("expected '(' after 'for'\n");
+        }
+        tokens.pop_front();
+
+        if (tokens.front() == "int"){
+            stat->statement_type = "for_declaration";
+
+            stat->items.push_back(parse_block_item(tokens));
+        } else {
+            stat->statement_type = "for_expression";
+            stat->expression1 = parse_expression(tokens);
+
+            if (tokens.front() != ";") {
+                throw std::runtime_error("expected ';' after for loop init expression\n");
+            }
+            tokens.pop_front();
+        }
+
+        stat->expression2 = parse_expression(tokens);
+        // replace empty conditions with true (1)
+        if (stat->expression2->exp_type == "null") {
+            std::list<std::string> placeholder_tokens = {"1"};
+            stat->expression2 = parse_expression(placeholder_tokens);
+        }
+
+        if (tokens.front() != ";") {
+            throw std::runtime_error("expected ';' after for loop condition\n");
+        }
+        tokens.pop_front();
+
+        stat->expression3 = parse_expression(tokens);
+
+        if (tokens.front() != ")") {
+            throw std::runtime_error("expected ')' after for loop post expression\n");
+        }
+        tokens.pop_front();
+
+        stat->statement1 = parse_statement(tokens);
+
+    } else if (tokens.front() == "while") {
+        stat->statement_type = "while";
+        tokens.pop_front();
+
+        if (tokens.front() != "(") {
+            throw std::runtime_error("expected '(' after 'while'\n");
+        }
+        tokens.pop_front();
+
+        stat->expression1 = parse_expression(tokens);
+
+        if (tokens.front() != ")") {
+            throw std::runtime_error("expected ')' after while loop expression\n");
+        }
+        tokens.pop_front();
+
+        stat->statement1 = parse_statement(tokens);
+
+    } else if (tokens.front() == "do") {
+        stat->statement_type = "do";
+        tokens.pop_front();
+
+        stat->statement1 = parse_statement(tokens);
+
+        if (tokens.front() != "while") {
+            throw std::runtime_error("expected 'while' after 'do'\n");
+        }
+        tokens.pop_front();
+
+        stat->expression1 = parse_expression(tokens);
+
+        if (tokens.front() != ";") {
+            throw std::runtime_error("expected ';' after 'do ... while'\n");
+        }
+        tokens.pop_front();
+
+    } else if (tokens.front() == "break") {
+        stat->statement_type = "break";
+        tokens.pop_front();
+
+        if (tokens.front() != ";") {
+            throw std::runtime_error("expected ';' after 'break'\n");
+        }
+        tokens.pop_front();
+    } else if (tokens.front() == "continue") {
+        stat->statement_type = "continue";
+        tokens.pop_front();
+
+        if (tokens.front() != ";") {
+            throw std::runtime_error("expected ';' after 'continue'\n");
+        }
+        tokens.pop_front();
+
     } else if (tokens.front() == "{") {
         stat->statement_type = "compound";
         tokens.pop_front();
@@ -373,7 +472,7 @@ std::shared_ptr<Statement> parse_statement(std::list<std::string>& tokens) {
         tokens.pop_front();
     } else {
         stat->statement_type = "expression";
-        stat->expression = parse_expression(tokens);
+        stat->expression1 = parse_expression(tokens);
         if (tokens.front() != ";") {
             throw std::runtime_error("expected ';'\n");
         }
@@ -384,22 +483,37 @@ std::shared_ptr<Statement> parse_statement(std::list<std::string>& tokens) {
 
 json jsonify_statement(std::shared_ptr<Statement>& stat) {
     if (stat->statement_type == "expression") {
-        return jsonify_expression(stat->expression);
+        return jsonify_expression(stat->expression1);
     } else {
         json ast = {{"type", stat->statement_type}};
 
         if (stat->statement_type == "conditional") {
-            ast["condition"] = jsonify_expression(stat->expression);
-            ast["if_statement"] = jsonify_statement(stat->if_statement);
-            ast["else_statement"] = jsonify_statement(stat->else_statement);
+            ast["condition"] = jsonify_expression(stat->expression1);
+            ast["if_statement"] = jsonify_statement(stat->statement1);
+            ast["else_statement"] = jsonify_statement(stat->statement2);
+        } else if (stat->statement_type == "for_declaration") {
+            ast["init"] = jsonify_block_item(stat->items.front());
+            ast["condition"] = jsonify_expression(stat->expression2);
+            ast["post"] = jsonify_expression(stat->expression3);
+            ast["statement"] = jsonify_statement(stat->statement1);
+        } else if (stat->statement_type == "for_expression") {
+            ast["init"] = jsonify_expression(stat->expression1);
+            ast["condition"] = jsonify_expression(stat->expression2);
+            ast["post"] = jsonify_expression(stat->expression3);
+            ast["statement"] = jsonify_statement(stat->statement1);
+        } else if (stat->statement_type == "while" || stat->statement_type == "do") {
+            ast["condition"] = jsonify_expression(stat->expression1);
+            ast["statment"] = jsonify_statement(stat->statement1);
         } else if (stat->statement_type == "compound") {
             json items_json;
             for (auto item: stat->items) {
                 items_json += jsonify_block_item(item);
             }
             ast["block_items"] = items_json;
-        } else { // if (stat->statement_type == "return") {
-            ast["expression"] = jsonify_expression(stat->expression);
+        } else if (stat->statement_type == "return") {
+            ast["expression"] = jsonify_expression(stat->expression1);
+        } else { // if stat->statment_type == "break" || stat->statement_type == "continue") {
+            // do nothing
         }
         return ast;
     }
@@ -407,27 +521,37 @@ json jsonify_statement(std::shared_ptr<Statement>& stat) {
 
 std::shared_ptr<Expression> parse_expression(std::list<std::string>& tokens) {
     auto exp = std::shared_ptr<Expression>(new Expression);
-
-    exp->expressions.push_back(parse_expression_assignment(tokens));
-
-    while (tokens.front() == ",") {
-        tokens.pop_front();
+    if (tokens.front() == ";" || tokens.front() == ")") {
+        exp->exp_type = "null";
+        return exp;
+    } else {
+        exp->exp_type = "assignment";
         exp->expressions.push_back(parse_expression_assignment(tokens));
+
+        while (tokens.front() == ",") {
+            tokens.pop_front();
+            exp->expressions.push_back(parse_expression_assignment(tokens));
+        }
+        return exp;
     }
-    return exp;
 }
 
 json jsonify_expression(std::shared_ptr<Expression>& exp) {
     json ast;
-    ast += jsonify_expression_assignment(exp->expressions.front());
-    auto expression = exp->expressions.begin();
-    std::advance(expression, 1);
-    for (int i=0; i<exp->expressions.size()-1;i++) {
-        ast += ",";
-        ast += jsonify_expression_assignment(*expression);
+    if (exp->exp_type == "null") {
+        ast["type"] = exp->exp_type;
+        return ast;
+    } else { // if (exp->exp_type == "assignment") {
+        ast += jsonify_expression_assignment(exp->expressions.front());
+        auto expression = exp->expressions.begin();
         std::advance(expression, 1);
+        for (int i=0; i<exp->expressions.size()-1;i++) {
+            ast += ",";
+            ast += jsonify_expression_assignment(*expression);
+            std::advance(expression, 1);
+        }
+        return ast;
     }
-    return ast;
 }
 
 std::shared_ptr<ExpressionAssignment> parse_expression_assignment(std::list<std::string>& tokens) {

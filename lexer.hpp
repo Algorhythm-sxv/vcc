@@ -10,7 +10,12 @@ std::list<std::string> lex(std::ifstream& file) {
                                             "int[^\\w]",                        // int keyword
                                             "return[^\\w]",                     // return keyword
                                             "if[^\\w]",                         // if keyword
-                                            "else[\\w]",                        // else keyword
+                                            "else[^\\w]",                       // else keyword
+                                            "for[^\\w]",                        // for keyword    
+                                            "while[^\\w]",                      // while keyword
+                                            "do[^\\w]",                         // do keyword
+                                            "break[^\\w]",                      // break keyword
+                                            "continue[^\\w]",                   // continue keyword
                                             "\\{", "\\}",                       // braces
 
                                             // Operators (in order of precedence)
@@ -30,7 +35,7 @@ std::list<std::string> lex(std::ifstream& file) {
                                             "%[^=]",                            // modulo
 
                                             "\\+[^=+]",                         // addition
-                                            "-[^=]",                            // subtraction
+                                            "-[^=-]",                            // subtraction
 
                                             "<<[^=]",                           // left shift
                                             ">>[^=]",                           // right shift

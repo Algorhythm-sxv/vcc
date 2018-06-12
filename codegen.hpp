@@ -1,10 +1,11 @@
 #include <fstream>
+#include <set>
 #include <string>
 
 #include "parser.hpp"
 #include <boost/format.hpp>
 
-int global_counter = 0;
+int global_counter = 0; // counter for jump labels
 
 std::map<std::string, std::string> unary_ops = {
     {"-",  "    neg     %eax\n"},
@@ -59,37 +60,40 @@ std::map<std::string, std::string> assignment_ops = {
 
 std::string codegen_x86_program(Program& program);
 std::string codegen_x86_function(std::shared_ptr<Function>& function);
-std::string codegen_x86_statement(std::shared_ptr<Statement>& statement, 
-                                  std::map<std::string, int>& local_addresses);
 std::string codegen_x86_block_item(std::shared_ptr<BlockItem>& item, 
-                                  std::map<std::string, int>& local_addresses);
+                                  std::map<std::string, int>& local_addresses,
+                                  std::set<std::string>& current_scope,
+                                  int& stack_index);
+std::string codegen_x86_statement(std::shared_ptr<Statement>& statement, 
+                                  std::map<std::string, int> local_addresses,
+                                  int stack_index);
 std::string codegen_x86_expression(std::shared_ptr<Expression>& exp, 
-                                   std::map<std::string, int>& local_addresses);
+                                   std::map<std::string, int> local_addresses);
 std::string codegen_x86_expression_assignment(std::shared_ptr<ExpressionAssignment>& exp, 
-                                   std::map<std::string, int>& local_addresses);
+                                   std::map<std::string, int> local_addresses);
 std::string codegen_x86_expression_conditional(std::shared_ptr<ExpressionConditional>& exp, 
-                                   std::map<std::string, int>& local_addresses);
+                                   std::map<std::string, int> local_addresses);
 std::string codegen_x86_expression_logic_or(std::shared_ptr<ExpressionLogicOr>& exp, 
-                                            std::map<std::string, int>& local_addresses);
+                                            std::map<std::string, int> local_addresses);
 std::string codegen_x86_expression_logic_and(std::shared_ptr<ExpressionLogicAnd>& exp, 
-                                             std::map<std::string, int>& local_addresses);
-std::string codegen_x86_expression_bitwise_or(std::shared_ptr<ExpressionBitwiseOr>& exp, std::map<std::string, int>& local_addresses);
+                                             std::map<std::string, int> local_addresses);
+std::string codegen_x86_expression_bitwise_or(std::shared_ptr<ExpressionBitwiseOr>& exp, std::map<std::string, int> local_addresses);
 std::string codegen_x86_expression_bitwise_xor(std::shared_ptr<ExpressionBitwiseXor>& exp,
-                                               std::map<std::string, int>& local_addresses);
+                                               std::map<std::string, int> local_addresses);
 std::string codegen_x86_expression_bitwise_and(std::shared_ptr<ExpressionBitwiseAnd>& exp, 
-                                               std::map<std::string, int>& local_addresses);
+                                               std::map<std::string, int> local_addresses);
 std::string codegen_x86_expression_equality(std::shared_ptr<ExpressionEquality>& exp,
-                                            std::map<std::string, int>& local_addresses);
+                                            std::map<std::string, int> local_addresses);
 std::string codegen_x86_expression_relational(std::shared_ptr<ExpressionRelational>& exp,
-                                              std::map<std::string, int>& local_addresses);
+                                              std::map<std::string, int> local_addresses);
 std::string codegen_x86_expression_shift(std::shared_ptr<ExpressionShift>& exp, 
-                                         std::map<std::string, int>& local_addresses);
+                                         std::map<std::string, int> local_addresses);
 std::string codegen_x86_expression_add_sub(std::shared_ptr<ExpressionAddSub>& exp, 
-                                           std::map<std::string, int>& local_addresses);
+                                           std::map<std::string, int> local_addresses);
 std::string codegen_x86_term(std::shared_ptr<Term>& term, 
-                             std::map<std::string, int>& local_addresses);
+                             std::map<std::string, int> local_addresses);
 std::string codegen_x86_factor(std::shared_ptr<Factor>& factor, 
-                               std::map<std::string, int>& local_addresses);
+                               std::map<std::string, int> local_addresses);
 
 std::string codegen_x86(Program& prog) {
     std::string out;
@@ -103,6 +107,8 @@ std::string codegen_x86(Program& prog) {
 
 std::string codegen_x86_function(std::shared_ptr<Function>& function) {
     std::map<std::string, int> locals;
+    std::set<std::string> current_scope;
+    int stack_index = -4;   // stack offset for variables
 
     boost::format out_format(
         ".globl _%s\n_"
@@ -114,9 +120,8 @@ std::string codegen_x86_function(std::shared_ptr<Function>& function) {
     out_format % function->id % function->id;
     std::string out = out_format.str();
     for (auto item : function->items) {
-        out += codegen_x86_block_item(item, locals);
+        out += codegen_x86_block_item(item, locals, current_scope, stack_index);
     }
-
     out += "    movl    $0, %eax\n"
            "    movl    %ebp, %esp\n"               // add function epilogue (ensures all function return eventually)
            "    pop     %ebp\n"
@@ -125,16 +130,18 @@ std::string codegen_x86_function(std::shared_ptr<Function>& function) {
     return out;
 }
 
-std::string codegen_x86_block_item(std::shared_ptr<BlockItem>& item, std::map<std::string, int>& local_addresses) {
+std::string codegen_x86_block_item(std::shared_ptr<BlockItem>& item, std::map<std::string, int>& local_addresses, std::set<std::string>& current_scope, int& stack_index) {
     if (item->item_type == "statement") {
-        return codegen_x86_statement(item->statement, local_addresses);
+        return codegen_x86_statement(item->statement, local_addresses, stack_index);
     } else { // if (item->item_type == "variable_declaration") {
-        if (!local_addresses.empty()) {
-            auto prev = local_addresses.rbegin()->first;                   // get the address of the previous variable
-            local_addresses[item->var_id] = local_addresses[prev] - 4;     // add the address of the new variable
-        } else {
-            local_addresses[item->var_id] = -4;
+        if (current_scope.count(item->var_id)) {
+            throw std::runtime_error("variable '" + item->var_id + "' already declared in this scope\n");
         }
+
+        local_addresses[item->var_id] = stack_index;
+        current_scope.insert(item->var_id);
+        stack_index -= 4;
+
         if (item->initialised) {
             boost::format format_str(
                 "%s"                         // asm for variable value (stored in eax)
@@ -148,7 +155,7 @@ std::string codegen_x86_block_item(std::shared_ptr<BlockItem>& item, std::map<st
     }
 }
 
-std::string codegen_x86_statement(std::shared_ptr<Statement>& statement, std::map<std::string, int>& local_addresses) {
+std::string codegen_x86_statement(std::shared_ptr<Statement>& statement, std::map<std::string, int> local_addresses, int stack_index) {
     if (statement->statement_type == "expression") {
         return codegen_x86_expression(statement->expression, local_addresses);
     } else if (statement->statement_type == "conditional") {
@@ -163,14 +170,25 @@ std::string codegen_x86_statement(std::shared_ptr<Statement>& statement, std::ma
                                  "_end%d:\n");                  // label for after else code
         
         format_str % global_counter
-                   % codegen_x86_statement(statement->if_statement, local_addresses)
+                   % codegen_x86_statement(statement->if_statement, local_addresses, stack_index)
                    % global_counter
                    % global_counter
-                   % codegen_x86_statement(statement->else_statement, local_addresses)
+                   % codegen_x86_statement(statement->else_statement, local_addresses, stack_index)
                    % global_counter;
 
         global_counter++;
 
+        out += format_str.str();
+        return out;
+    } else if (statement->statement_type == "compound") {
+        std::string out = "";
+        std::set<std::string> current_scope;
+
+        for (auto item: statement->items) {
+            out += codegen_x86_block_item(item, local_addresses, current_scope, stack_index);
+        }
+        boost::format format_str("    addl    $%d, %%esp\n");               // deallocate variables from the inner scope
+        format_str % (4*current_scope.size());
         out += format_str.str();
         return out;
     } else { // if (statement->statement_type == "return") {
@@ -185,7 +203,7 @@ std::string codegen_x86_statement(std::shared_ptr<Statement>& statement, std::ma
     }
 }
 
-std::string codegen_x86_expression(std::shared_ptr<Expression>& exp, std::map<std::string, int>& local_addresses) {
+std::string codegen_x86_expression(std::shared_ptr<Expression>& exp, std::map<std::string, int> local_addresses) {
     std::string out = "";
     for (auto expression: exp->expressions) {
         out += codegen_x86_expression_assignment(expression, local_addresses);
@@ -193,7 +211,7 @@ std::string codegen_x86_expression(std::shared_ptr<Expression>& exp, std::map<st
     return out;
 }
 
-std::string codegen_x86_expression_assignment(std::shared_ptr<ExpressionAssignment>& exp, std::map<std::string, int>& local_addresses) {
+std::string codegen_x86_expression_assignment(std::shared_ptr<ExpressionAssignment>& exp, std::map<std::string, int> local_addresses) {
     if (exp->exp_type == "conditional") {
         return codegen_x86_expression_conditional(exp->expression, local_addresses);
     } else { // if (exp->exp_type == "assignment") {
@@ -215,7 +233,7 @@ std::string codegen_x86_expression_assignment(std::shared_ptr<ExpressionAssignme
     }
 }
 
-std::string codegen_x86_expression_conditional(std::shared_ptr<ExpressionConditional>& exp, std::map<std::string, int>& local_addresses) {
+std::string codegen_x86_expression_conditional(std::shared_ptr<ExpressionConditional>& exp, std::map<std::string, int> local_addresses) {
     if (exp->exp_type == "logic_or") {
         return codegen_x86_expression_logic_or(exp->condition, local_addresses);
     } else { // if (exp->exp_type == "conditional") {
@@ -242,7 +260,7 @@ std::string codegen_x86_expression_conditional(std::shared_ptr<ExpressionConditi
     }
 }
 
-std::string codegen_x86_expression_logic_or(std::shared_ptr<ExpressionLogicOr>& exp, std::map<std::string, int>& local_addresses) {
+std::string codegen_x86_expression_logic_or(std::shared_ptr<ExpressionLogicOr>& exp, std::map<std::string, int> local_addresses) {
     if (exp->expressions.size() == 1) {
         return codegen_x86_expression_logic_and(exp->expressions.front(), local_addresses);
     } else {
@@ -267,7 +285,7 @@ std::string codegen_x86_expression_logic_or(std::shared_ptr<ExpressionLogicOr>& 
     }
 }
 
-std::string codegen_x86_expression_logic_and(std::shared_ptr<ExpressionLogicAnd>& exp, std::map<std::string, int>& local_addresses) {
+std::string codegen_x86_expression_logic_and(std::shared_ptr<ExpressionLogicAnd>& exp, std::map<std::string, int> local_addresses) {
     if (exp->expressions.size() == 1) {
         return codegen_x86_expression_bitwise_or(exp->expressions.front(), local_addresses);
     } else {
@@ -294,7 +312,7 @@ std::string codegen_x86_expression_logic_and(std::shared_ptr<ExpressionLogicAnd>
     }
 }
 
-std::string codegen_x86_expression_bitwise_or(std::shared_ptr<ExpressionBitwiseOr>& exp, std::map<std::string, int>& local_addresses) {
+std::string codegen_x86_expression_bitwise_or(std::shared_ptr<ExpressionBitwiseOr>& exp, std::map<std::string, int> local_addresses) {
     if (exp->expressions.size() == 1) {
         return codegen_x86_expression_bitwise_xor(exp->expressions.front(), local_addresses);
     } else {
@@ -317,7 +335,7 @@ std::string codegen_x86_expression_bitwise_or(std::shared_ptr<ExpressionBitwiseO
     }
 }
 
-std::string codegen_x86_expression_bitwise_xor(std::shared_ptr<ExpressionBitwiseXor>& exp, std::map<std::string, int>& local_addresses) {
+std::string codegen_x86_expression_bitwise_xor(std::shared_ptr<ExpressionBitwiseXor>& exp, std::map<std::string, int> local_addresses) {
     if (exp->expressions.size() == 1) {
         return codegen_x86_expression_bitwise_and(exp->expressions.front(), local_addresses);
     } else {
@@ -340,7 +358,7 @@ std::string codegen_x86_expression_bitwise_xor(std::shared_ptr<ExpressionBitwise
     }
 }
 
-std::string codegen_x86_expression_bitwise_and(std::shared_ptr<ExpressionBitwiseAnd>& exp, std::map<std::string, int>& local_addresses) {
+std::string codegen_x86_expression_bitwise_and(std::shared_ptr<ExpressionBitwiseAnd>& exp, std::map<std::string, int> local_addresses) {
     if (exp->expressions.size() == 1) {
         return codegen_x86_expression_equality(exp->expressions.front(), local_addresses);
     } else {
@@ -363,7 +381,7 @@ std::string codegen_x86_expression_bitwise_and(std::shared_ptr<ExpressionBitwise
     }
 }
 
-std::string codegen_x86_expression_equality(std::shared_ptr<ExpressionEquality>& exp, std::map<std::string, int>& local_addresses) {
+std::string codegen_x86_expression_equality(std::shared_ptr<ExpressionEquality>& exp, std::map<std::string, int> local_addresses) {
     if (exp->expressions.size() == 1) {
         return codegen_x86_expression_relational(exp->expressions.front(), local_addresses);
     } else {
@@ -388,7 +406,7 @@ std::string codegen_x86_expression_equality(std::shared_ptr<ExpressionEquality>&
     }
 }
 
-std::string codegen_x86_expression_relational(std::shared_ptr<ExpressionRelational>& exp, std::map<std::string, int>& local_addresses) {
+std::string codegen_x86_expression_relational(std::shared_ptr<ExpressionRelational>& exp, std::map<std::string, int> local_addresses) {
     if (exp->expressions.size() == 1) {
         return codegen_x86_expression_shift(exp->expressions.front(), local_addresses);
     } else {
@@ -413,7 +431,7 @@ std::string codegen_x86_expression_relational(std::shared_ptr<ExpressionRelation
     }
 }
 
-std::string codegen_x86_expression_shift(std::shared_ptr<ExpressionShift>& exp, std::map<std::string, int>& local_addresses) {
+std::string codegen_x86_expression_shift(std::shared_ptr<ExpressionShift>& exp, std::map<std::string, int> local_addresses) {
     if (exp->expressions.size() == 1) {
         return codegen_x86_expression_add_sub(exp->expressions.front(), local_addresses);
     } else {
@@ -449,7 +467,7 @@ std::string codegen_x86_expression_shift(std::shared_ptr<ExpressionShift>& exp, 
     }
 }
 
-std::string codegen_x86_expression_add_sub(std::shared_ptr<ExpressionAddSub>& exp, std::map<std::string, int>& local_addresses) {
+std::string codegen_x86_expression_add_sub(std::shared_ptr<ExpressionAddSub>& exp, std::map<std::string, int> local_addresses) {
     if (exp->terms.size() == 1) {
         return codegen_x86_term(exp->terms.front(), local_addresses);
     } else {
@@ -485,7 +503,7 @@ std::string codegen_x86_expression_add_sub(std::shared_ptr<ExpressionAddSub>& ex
     }
 }
 
-std::string codegen_x86_term(std::shared_ptr<Term>& term, std::map<std::string, int>& local_addresses) {
+std::string codegen_x86_term(std::shared_ptr<Term>& term, std::map<std::string, int> local_addresses) {
     if (term->factors.size() == 1) {
         return codegen_x86_factor(term->factors.front(), local_addresses);
     } else {
@@ -527,7 +545,7 @@ std::string codegen_x86_term(std::shared_ptr<Term>& term, std::map<std::string, 
     }
 }
 
-std::string codegen_x86_factor(std::shared_ptr<Factor>& factor, std::map<std::string, int>& local_addresses) {
+std::string codegen_x86_factor(std::shared_ptr<Factor>& factor, std::map<std::string, int> local_addresses) {
     if (factor->factor_type == "bracket_expression") {
         return codegen_x86_expression(factor->expression, local_addresses);
 
@@ -543,11 +561,8 @@ std::string codegen_x86_factor(std::shared_ptr<Factor>& factor, std::map<std::st
         boost::format format_str(
             "    movl    %d(%%ebp), %%eax\n"                // move the variable from the stack to eax
         );
-        std::string id;
-        try {
-            id = local_addresses[factor->id];
-        } catch(...) {
-            throw std::runtime_error("identifier '" + id + "' not declared in this scope\n");
+        if (!local_addresses.count(factor->id)) {
+            throw std::runtime_error("identifier '" + factor->id + "' not declared in this scope\n");
         }
         format_str % local_addresses[factor->id];
         return format_str.str();

@@ -11,14 +11,19 @@ int main(int argc, char* argv[]) {
 
     std::list<std::string> tokens = lex(file);
 
-    auto prog = parse_program(tokens);
+    try {
+        auto prog = parse_program(tokens);
 
-    json ast = jsonify_program(prog);
-    std::cout << ast.dump(4) << "\n";
+        json ast = jsonify_program(prog);
+        std::cout << ast.dump(4) << "\n";
 
-    std::filebuf fb;
-    fb.open("out.s", std::ios::out);
-    std::ostream asm_out(&fb);
-    asm_out << codegen_x86(prog);
-    fb.close();
+        std::filebuf fb;
+        fb.open("out.s", std::ios::out);
+        std::ostream asm_out(&fb);
+        asm_out << codegen_x86(prog);
+        fb.close();
+    } catch (const std::runtime_error& e) {
+        std::cout << "Error: " << e.what();
+        exit;
+    }
 }

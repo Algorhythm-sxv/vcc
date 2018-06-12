@@ -5,6 +5,7 @@
 // <statement> ::= "return" <exp> ";"
 //               | <exp> ";"
 //               | "if" "(" <exp> ")" <statement> [ "else" <statement> ]
+//               | "{" { <block-item> } "}"
 
 // <exp> ::= <assignment-exp> { "," <assignment-exp> }
 // <assignment-exp> ::= <id> "=" <exp> | <conditional-exp>
@@ -114,6 +115,7 @@ class Statement {
     std::shared_ptr<Expression> expression;
     std::shared_ptr<Statement> if_statement;
     std::shared_ptr<Statement> else_statement;
+    std::list<std::shared_ptr<BlockItem>> items;
 };
 
 class Expression {
@@ -362,6 +364,13 @@ std::shared_ptr<Statement> parse_statement(std::list<std::string>& tokens) {
         }
     } else if (tokens.front() == "else") {
         throw std::runtime_error("'else' statement has no parent 'if' statement\n");
+    } else if (tokens.front() == "{") {
+        stat->statement_type = "compound";
+        tokens.pop_front();
+        while (tokens.front() != "}") {
+            stat->items.push_back(parse_block_item(tokens));
+        }
+        tokens.pop_front();
     } else {
         stat->statement_type = "expression";
         stat->expression = parse_expression(tokens);
@@ -376,13 +385,19 @@ std::shared_ptr<Statement> parse_statement(std::list<std::string>& tokens) {
 json jsonify_statement(std::shared_ptr<Statement>& stat) {
     if (stat->statement_type == "expression") {
         return jsonify_expression(stat->expression);
-    } else { // if (stat->statement_type == "conditional") {
+    } else {
         json ast = {{"type", stat->statement_type}};
 
         if (stat->statement_type == "conditional") {
             ast["condition"] = jsonify_expression(stat->expression);
             ast["if_statement"] = jsonify_statement(stat->if_statement);
             ast["else_statement"] = jsonify_statement(stat->else_statement);
+        } else if (stat->statement_type == "compound") {
+            json items_json;
+            for (auto item: stat->items) {
+                items_json += jsonify_block_item(item);
+            }
+            ast["block_items"] = items_json;
         } else { // if (stat->statement_type == "return") {
             ast["expression"] = jsonify_expression(stat->expression);
         }

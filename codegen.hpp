@@ -13,8 +13,8 @@ std::map<std::string, std::string> unary_ops = {
     {"!",  "    cmpl    $0, %eax\n"
            "    movl    $0, %eax\n"
            "    sete    %al\n"},
-    {"++", "    addl    $1, %eax\n"},
-    {"--", "    subl    $1, %eax\n"}
+    {"++", "    incl    %eax\n"},
+    {"--", "    decl    %eax\n"}
 };
 
 std::map<std::string, std::string> comparison_ops {
@@ -63,10 +63,17 @@ std::string codegen_x86_function(std::shared_ptr<Function>& function);
 std::string codegen_x86_block_item(std::shared_ptr<BlockItem>& item, 
                                   std::map<std::string, int>& local_addresses,
                                   std::set<std::string>& current_scope,
-                                  int& stack_index);
-std::string codegen_x86_statement(std::shared_ptr<Statement>& statement, 
+                                  int& stack_index,
+                                  int inner_loop_count);
+std::string codegen_x86_declaration(std::shared_ptr<Declaration>& decl, 
+                                    std::map<std::string, int>& local_addresses,
+                                    std::set<std::string>& current_scope,
+                                    int& stack_index);
+std::string codegen_x86_statement(std::shared_ptr<Statement>& stat, 
                                   std::map<std::string, int> local_addresses,
-                                  int stack_index);
+                                  std::set<std::string>& current_scope,
+                                  int stack_index,
+                                  int inner_loop_count);
 std::string codegen_x86_expression(std::shared_ptr<Expression>& exp, 
                                    std::map<std::string, int> local_addresses);
 std::string codegen_x86_expression_assignment(std::shared_ptr<ExpressionAssignment>& exp, 
@@ -108,6 +115,7 @@ std::string codegen_x86(Program& prog) {
 std::string codegen_x86_function(std::shared_ptr<Function>& function) {
     std::map<std::string, int> locals;
     std::set<std::string> current_scope;
+    int inner_loop_count = -1;
     int stack_index = -4;   // stack offset for variables
 
     boost::format out_format(
@@ -120,7 +128,7 @@ std::string codegen_x86_function(std::shared_ptr<Function>& function) {
     out_format % function->id % function->id;
     std::string out = out_format.str();
     for (auto item : function->items) {
-        out += codegen_x86_block_item(item, locals, current_scope, stack_index);
+        out += codegen_x86_block_item(item, locals, current_scope, stack_index, inner_loop_count);
     }
     out += "    movl    $0, %eax\n"
            "    movl    %ebp, %esp\n"               // add function epilogue (ensures all function return eventually)
@@ -130,38 +138,52 @@ std::string codegen_x86_function(std::shared_ptr<Function>& function) {
     return out;
 }
 
-std::string codegen_x86_block_item(std::shared_ptr<BlockItem>& item, std::map<std::string, int>& local_addresses, std::set<std::string>& current_scope, int& stack_index) {
+std::string codegen_x86_block_item(std::shared_ptr<BlockItem>& item, 
+                                   std::map<std::string, int>& local_addresses, 
+                                   std::set<std::string>& current_scope, 
+                                   int& stack_index,
+                                   int inner_loop_count) {
     if (item->item_type == "statement") {
-        return codegen_x86_statement(item->statement, local_addresses, stack_index);
+        return codegen_x86_statement(item->statement, local_addresses, current_scope, stack_index, inner_loop_count);
     } else { // if (item->item_type == "variable_declaration") {
-        if (current_scope.count(item->var_id)) {
-            throw std::runtime_error("variable '" + item->var_id + "' already declared in this scope\n");
-        }
-
-        local_addresses[item->var_id] = stack_index;
-        current_scope.insert(item->var_id);
-        stack_index -= 4;
-
-        if (item->initialised) {
-            boost::format format_str(
-                "%s"                         // asm for variable value (stored in eax)
-                "    pushl   %%eax\n"        // push variable onto stack
-            );
-            format_str % codegen_x86_expression(item->init_exp, local_addresses);
-            return format_str.str();
-        } else {
-            return std::string("    movl    -4(%esp), %esp\n");           // move the stack pointer past the new variable
-        }
+        return codegen_x86_declaration(item->declaration, local_addresses, current_scope, stack_index);
     }
 }
 
-std::string codegen_x86_statement(std::shared_ptr<Statement>& statement, std::map<std::string, int> local_addresses, int stack_index) {
-    if (statement->statement_type == "expression") {
-        return codegen_x86_expression(statement->expression, local_addresses);
-    } else if (statement->statement_type == "conditional") {
+std::string codegen_x86_declaration(std::shared_ptr<Declaration>& decl,
+                                    std::map<std::string, int>& local_addresses,
+                                    std::set<std::string>& current_scope,
+                                    int& stack_index) {
+    if (current_scope.count(decl->var_id)) {
+        throw std::runtime_error("variable '" + decl->var_id + "' already declared in this scope\n");
+    }
+    local_addresses[decl->var_id] = stack_index;
+    current_scope.insert(decl->var_id);
+    stack_index -= 4;
+
+    if (decl->initialised) {
+        boost::format format_str(
+            "%s"                         // asm for variable value (stored in eax)
+            "    pushl   %%eax\n"        // push variable onto stack
+        );
+        format_str % codegen_x86_expression(decl->init_exp, local_addresses);
+        return format_str.str();
+    } else {
+        return std::string("    subl    $4, %esp\n");       // move the stack pointer past the new variable
+    }
+}
+
+std::string codegen_x86_statement(std::shared_ptr<Statement>& stat, 
+                                  std::map<std::string, int> local_addresses, 
+                                  std::set<std::string>& current_scope,
+                                  int stack_index,
+                                  int inner_loop_count) {
+    if (stat->statement_type == "expression") {
+        return codegen_x86_expression(stat->expression1, local_addresses);
+    } else if (stat->statement_type == "conditional") {
         std::string out = codegen_x86_expression(
-            statement->expression, local_addresses);            // asm for condition (stored in eax)
-        boost::format format_str("    cmpl    $0, %%eax\n"      // test value of condition
+            stat->expression1, local_addresses);           // asm for condition (stored in eax)
+        boost::format out_format("    cmpl    $0, %%eax\n"      // test value of condition
                                  "    je      _e%d\n"           // if condition is 0, jump to else code
                                  "%s"                           // asm for if code
                                  "    jmp     _end%d\n"         // jump past else code
@@ -169,46 +191,159 @@ std::string codegen_x86_statement(std::shared_ptr<Statement>& statement, std::ma
                                  "%s"                           // asm for else code
                                  "_end%d:\n");                  // label for after else code
         
-        format_str % global_counter
-                   % codegen_x86_statement(statement->if_statement, local_addresses, stack_index)
-                   % global_counter
-                   % global_counter
-                   % codegen_x86_statement(statement->else_statement, local_addresses, stack_index)
-                   % global_counter;
+        int local_counter = global_counter;
+        global_counter++;
+        out_format % local_counter
+                   % codegen_x86_statement(stat->statement1, local_addresses, current_scope, stack_index, inner_loop_count)
+                   % local_counter
+                   % local_counter
+                   % codegen_x86_statement(stat->statement2, local_addresses, current_scope, stack_index, inner_loop_count)
+                   % local_counter;
 
+        out += out_format.str();
+        return out;
+    } else if (stat->statement_type.find("for") == 0) {
+        std::string out = "";
+        std::set<std::string> current_scope;
+        int local_counter, inner_loop_count = global_counter;
         global_counter++;
 
-        out += format_str.str();
+        if (stat->statement_type == "for_declaration") {
+            out = codegen_x86_block_item(stat->items.front(), 
+                                         local_addresses, 
+                                         current_scope, 
+                                         stack_index, 
+                                         inner_loop_count);                 // asm for init declaration
+        } else { // if (stat->statement_type == "for_expression") {
+            out = codegen_x86_expression(
+                stat->expression1, local_addresses);                   // asm for init expression
+        }
+        boost::format out_format("_cond%d:\n"                               // label for loop condition
+                                 "%s"                                       // asm for condition expression (stored in eax)
+                                 "    cmpl    $0, %%eax\n"                  // compare condition to 0
+                                 "    je      _end%d\n"                     // if the condition is false, jump to the end of the loop
+                                 "%s"                                       // asm for loop body statement
+                                 "_cont%d:\n"                               // label for continue statement
+                                 "%s"                                       // asm for post expression
+                                 "    jmp    _cond%d\n"                     // jump to loop condition
+                                 "_end%d:\n"                                // label for end of loop
+                                );
+        out_format % local_counter
+                   % codegen_x86_expression(stat->expression2, local_addresses)
+                   % local_counter
+                   % codegen_x86_statement(stat->statement1, local_addresses, current_scope, stack_index, inner_loop_count)
+                   % local_counter
+                   % codegen_x86_expression(stat->expression3, local_addresses)
+                   % local_counter
+                   % local_counter;
+
+        out += out_format.str();
+
+        if (stat->statement_type == "for_declaration") {
+            boost::format dealloc("    addl    $%d, %%esp\n");              // deallocate variables from header scope
+            dealloc % (4*current_scope.size());
+            out += dealloc.str();
+        }
+
         return out;
-    } else if (statement->statement_type == "compound") {
+    } else if (stat->statement_type == "while" || stat->statement_type == "do") {
+        std::string out = "";
+        int local_counter, inner_loop_count = global_counter;
+        global_counter++;
+        
+        std::string cond = codegen_x86_expression(stat->expression1, local_addresses);
+        std::string body = codegen_x86_statement(stat->statement1, local_addresses, current_scope, stack_index, inner_loop_count);
+
+        std::string out_format = "";
+        boost::format loop_format;
+
+        if (stat->statement_type == "while") {
+            out_format = "_cond%d:\n"                                       // label for loop condition
+                         "%s"                                               // asm for condition expression (stored in eax)
+                         "    cmpl    $0, %%eax\n"                          // compare condition to 0
+                         "    je      _end%d\n"                             // if condition is false, jump to end of loop
+                         "%s"                                               // asm for loop body statement
+                         "_cont%d:\n"                                       // label for continue statement
+                         "    jmp     _cond%d\n"                            // jump to condition
+                         "_end%d:\n";                                       // label for end of loop
+            loop_format = boost::format(out_format);
+            loop_format % local_counter
+                        % cond
+                        % local_counter
+                        % body
+                        % local_counter
+                        % local_counter
+                        % local_counter;
+        } else { // if (stat->statement_type == "do") {
+            out_format = "_start%d:\n"                                      // label for loop start
+                         "%s"                                               // asm for loop body statement
+                         "%s"                                               // asm for condition expression (stored in eax)
+                         "    cmpl    $0, %%eax\n"                          // compare condition to 0
+                         "    je      _end%d\n"                             // if condition is false, jump to end of loop
+                         "_cont%d:\n"                                       // label for continue statement
+                         "    jmp     _start%d\n"                           // jump to start of loop
+                         "_end%d:\n";                                       // label for end of loop
+            loop_format = boost::format(out_format);
+            loop_format % local_counter
+                        % body
+                        % cond
+                        % local_counter
+                        % local_counter
+                        % local_counter
+                        % local_counter;
+        }
+        out += loop_format.str();
+        return out;
+    } else if (stat->statement_type == "break") {
+        if (inner_loop_count == -1) {
+            throw std::runtime_error("encountered 'break' outside of a loop\n");
+        }
+        boost::format out_format("    addl    $%d, %%esp\n"
+                                 "    jmp     _end%d\n");
+        out_format % (4*current_scope.size()) % inner_loop_count;
+        return out_format.str();
+    } else if (stat->statement_type == "continue") {
+        if (inner_loop_count == -1) {
+            throw std::runtime_error("encountered 'continue' outside of a loop\n");
+        }
+        boost::format out_format("    addl    $%d, %%esp\n"
+                                 "    jmp     _cont%d\n");
+        out_format % (4*current_scope.size()) % inner_loop_count;
+        return out_format.str();
+    } else if (stat->statement_type == "compound") {
         std::string out = "";
         std::set<std::string> current_scope;
 
-        for (auto item: statement->items) {
-            out += codegen_x86_block_item(item, local_addresses, current_scope, stack_index);
+        for (auto item: stat->items) {
+            out += codegen_x86_block_item(item, local_addresses, current_scope, stack_index, inner_loop_count);
         }
-        boost::format format_str("    addl    $%d, %%esp\n");               // deallocate variables from the inner scope
-        format_str % (4*current_scope.size());
-        out += format_str.str();
+        if (current_scope.size()) {
+            boost::format out_format("    addl    $%d, %%esp\n");               // deallocate variables from the inner scope
+            out_format % (4*current_scope.size());
+            out += out_format.str();
+        }
         return out;
-    } else { // if (statement->statement_type == "return") {
-        boost::format out_format(
-            "%s"
-            "    movl    %%ebp, %%esp\n"
-            "    pop     %%ebp\n"
-            "    ret\n"
-        );
-        out_format % codegen_x86_expression(statement->expression, local_addresses);
+    } else { // if (stat->statement_type == "return") {
+        boost::format out_format("%s"
+                                 "    movl    %%ebp, %%esp\n"
+                                 "    pop     %%ebp\n"
+                                 "    ret\n"
+                                 );
+        out_format % codegen_x86_expression(stat->expression1, local_addresses);
         return out_format.str();
     }
 }
 
 std::string codegen_x86_expression(std::shared_ptr<Expression>& exp, std::map<std::string, int> local_addresses) {
-    std::string out = "";
-    for (auto expression: exp->expressions) {
-        out += codegen_x86_expression_assignment(expression, local_addresses);
+    if (exp->exp_type == "null") {
+        return std::string("");
+    } else { // if (exp->exp_type == "assignment") {
+        std::string out = "";
+        for (auto expression: exp->expressions) {
+            out += codegen_x86_expression_assignment(expression, local_addresses);
+        }
+        return out;
     }
-    return out;
 }
 
 std::string codegen_x86_expression_assignment(std::shared_ptr<ExpressionAssignment>& exp, std::map<std::string, int> local_addresses) {
@@ -247,13 +382,14 @@ std::string codegen_x86_expression_conditional(std::shared_ptr<ExpressionConditi
                                  "%s"                           // asm for else code
                                  "_end%d:\n");                  // label for end of else code
 
-        format_str % global_counter
-                   % codegen_x86_expression(exp->exp_true, local_addresses)
-                   % global_counter
-                   % global_counter
-                   % codegen_x86_expression_conditional(exp->exp_false, local_addresses)
-                   % global_counter;
+        int local_counter = global_counter;
         global_counter++;
+        format_str % local_counter
+                   % codegen_x86_expression(exp->exp_true, local_addresses)
+                   % local_counter
+                   % local_counter
+                   % codegen_x86_expression_conditional(exp->exp_false, local_addresses)
+                   % local_counter;
 
         out += format_str.str();
         return out;
@@ -529,15 +665,17 @@ std::string codegen_x86_term(std::shared_ptr<Term>& term, std::map<std::string, 
         std::advance(factor, 1);
         for (auto op: term->operators) {
             if (op == "*") {
-                boost::format format_str(mul_format_str);
-                format_str % codegen_x86_factor(*factor, local_addresses);
-                out += format_str.str();
+                boost::format out_format(mul_format_str);
+                out_format % codegen_x86_factor(*factor, local_addresses);
+                out += out_format.str();
             } else if (op == "/") {
-                boost::format format_str(div_format_str);
-                format_str % codegen_x86_factor(*factor, local_addresses);
+                boost::format out_format(div_format_str);
+                out_format % codegen_x86_factor(*factor, local_addresses);
+                out += out_format.str();
             } else { // if (*op == "%") {
-                boost::format format_str(mod_format_str);
-                format_str % codegen_x86_factor(*factor, local_addresses);
+                boost::format out_format(mod_format_str);
+                out_format % codegen_x86_factor(*factor, local_addresses);
+                out += out_format.str();
             }
             std::advance(factor, 1);
         }
@@ -550,6 +688,15 @@ std::string codegen_x86_factor(std::shared_ptr<Factor>& factor, std::map<std::st
         return codegen_x86_expression(factor->expression, local_addresses);
 
     } else if (factor->factor_type == "unary_op") {
+        if (factor->unaryop == "++" || factor->unaryop == "--") {
+            if (factor->factor->factor_type == "variable") {
+                std::string format_str = factor->unaryop == "++"? "    inc     %d(%%ebp)\n": "    dec     %d(%%ebp)\n";
+                boost::format out_format(format_str);
+
+                out_format % local_addresses[factor->factor->id];
+                return out_format.str();
+            }
+        }
         boost::format out_format(
             "%s"
             "%s"

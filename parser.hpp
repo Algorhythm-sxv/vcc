@@ -6,6 +6,12 @@
 //               | <exp> ";"
 //               | "if" "(" <exp> ")" <statement> [ "else" <statement> ]
 //               | "{" { <block-item> } "}"
+//               | "for" "(" <exp> ";" <exp> ";" <exp> ")" <statement>
+//               | "for" "(" <declaration> <exp> ";" <exp> ")" <statement>
+//               | "while" "(" <exp> ")" <statement>
+//               | "do" <statement> "while" <exp> ";"
+//               | "break" ";"
+//               | "continue" ";"
 
 // <exp> ::= <assignment-exp> { "," <assignment-exp> } | None
 // <assignment-exp> ::= <id> "=" <exp> | <conditional-exp>
@@ -32,6 +38,7 @@ using json = nlohmann::json;
 class Program;
 class Function;
 class BlockItem;
+class Declaration;
 class Statement;
 class Expression;
 class ExpressionAssignment;
@@ -52,6 +59,7 @@ class Factor; // sets operator precedence for binary * & /, unary !/~/-
 // Program parse_program(std::list<std::string>& tokens);
 std::shared_ptr<Function> parse_function(std::list<std::string>& tokens);
 std::shared_ptr<BlockItem> parse_block_item(std::list<std::string>& tokens);
+std::shared_ptr<Declaration> parse_declaration(std::list<std::string>& tokens);
 std::shared_ptr<Statement> parse_statement(std::list<std::string>& tokens);
 std::shared_ptr<Expression> parse_expression(std::list<std::string>& tokens);
 std::shared_ptr<ExpressionAssignment> parse_expression_assignment(std::list<std::string>& tokens);
@@ -71,6 +79,7 @@ std::shared_ptr<Factor> parse_factor(std::list<std::string>& tokens);
 json jsonify_program(Program& prog);
 json jsonify_function(std::shared_ptr<Function>& fun);
 json jsonify_block_item(std::shared_ptr<BlockItem>& item);
+json jsonify_declaration(std::shared_ptr<Declaration>& decl);
 json jsonify_statement(std::shared_ptr<Statement>& stat);
 json jsonify_expression(std::shared_ptr<Expression>& exp);
 json jsonify_expression_assignment(std::shared_ptr<ExpressionAssignment>& exp);
@@ -102,11 +111,16 @@ class Function {
 class BlockItem {
     public:
     std::string item_type;
+    std::shared_ptr<Declaration> declaration;
+    std::shared_ptr<Statement> statement;
+};
+
+class Declaration {
+    public:
     std::string var_type;
     std::string var_id;
     bool initialised = false;
     std::shared_ptr<Expression> init_exp;
-    std::shared_ptr<Statement> statement;
 };
 
 class Statement {
@@ -290,22 +304,10 @@ std::shared_ptr<BlockItem> parse_block_item(std::list<std::string>& tokens) {
     auto item = std::shared_ptr<BlockItem>(new BlockItem);
 
     if (tokens.front() == "int") {
-        item->item_type = "variable_declaration";
-        item->var_type = tokens.front();
-        tokens.pop_front();
+        item->item_type = "declaration";
 
-        item->var_id = tokens.front();
-        tokens.pop_front();
+        item->declaration = parse_declaration(tokens);
 
-        if (tokens.front() == "=") {
-            item->initialised = true;
-            tokens.pop_front();
-            item->init_exp = parse_expression(tokens);
-        }
-        if (tokens.front() != ";") {
-            throw std::runtime_error("expected ';'\n");
-        }
-        tokens.pop_front();
     } else {
         item->item_type = "statement";
         item->statement = parse_statement(tokens);
@@ -316,18 +318,43 @@ std::shared_ptr<BlockItem> parse_block_item(std::list<std::string>& tokens) {
 json jsonify_block_item(std::shared_ptr<BlockItem>& item) {
     if (item->item_type == "statement") {
         return jsonify_statement(item->statement);
-    } else { // if (item->item_type == "variable_declaration") {
-        json ast = {
-            {"type", item->item_type}, 
-            {"var_type", item->var_type},
-            {"var_id", item->var_id},
-            {"initialised", item->initialised}
-        };
-        if (item->initialised) {
-            ast["init_expression"] = jsonify_expression(item->init_exp);
-        }
-        return ast;
+    } else { // if (item->item_type == "declaration") {
+        return jsonify_declaration(item->declaration);
     }
+}
+
+std::shared_ptr<Declaration> parse_declaration(std::list<std::string>& tokens) {
+    auto decl = std::shared_ptr<Declaration>(new Declaration);
+
+    decl->var_type = tokens.front();
+    tokens.pop_front();
+
+    decl->var_id = tokens.front();
+    tokens.pop_front();
+
+    if (tokens.front() == "=") {
+        decl->initialised = true;
+        tokens.pop_front();
+        decl->init_exp = parse_expression(tokens);
+    }
+    if (tokens.front() != ";") {
+        throw std::runtime_error("expected ';'\n");
+    }
+    tokens.pop_front();
+
+    return decl;
+}
+
+json jsonify_declaration(std::shared_ptr<Declaration>& decl) {
+    json ast = {
+        {"var_type", decl->var_type},
+        {"var_id", decl->var_id},
+        {"initialised", decl->initialised}
+    };
+    if (decl->initialised) {
+        ast["init_expression"] = jsonify_expression(decl->init_exp);
+    }
+    return ast;
 }
 
 std::shared_ptr<Statement> parse_statement(std::list<std::string>& tokens) {
@@ -438,8 +465,17 @@ std::shared_ptr<Statement> parse_statement(std::list<std::string>& tokens) {
             throw std::runtime_error("expected 'while' after 'do'\n");
         }
         tokens.pop_front();
+        if (tokens.front() != "(") {
+            throw std::runtime_error("expected '(' after 'while'\n");
+        }
+        tokens.pop_front();
 
         stat->expression1 = parse_expression(tokens);
+
+        if (tokens.front() != ")") {
+            throw std::runtime_error("expected ')' after do-while condition\n");
+        }
+        tokens.pop_front();
 
         if (tokens.front() != ";") {
             throw std::runtime_error("expected ';' after 'do ... while'\n");
@@ -512,9 +548,7 @@ json jsonify_statement(std::shared_ptr<Statement>& stat) {
             ast["block_items"] = items_json;
         } else if (stat->statement_type == "return") {
             ast["expression"] = jsonify_expression(stat->expression1);
-        } else { // if stat->statment_type == "break" || stat->statement_type == "continue") {
-            // do nothing
-        }
+        } // else if stat->statment_type == "break" || stat->statement_type == "continue") {
         return ast;
     }
 }

@@ -13,8 +13,6 @@ std::map<std::string, std::string> unary_ops = {
     {"!",  "    cmpl    $0, %eax\n"
            "    movl    $0, %eax\n"
            "    sete    %al\n"},
-    {"++", "    incl    %eax\n"},
-    {"--", "    decl    %eax\n"}
 };
 
 std::map<std::string, std::string> comparison_ops {
@@ -65,10 +63,14 @@ std::string codegen_x86_block_item(std::shared_ptr<BlockItem>& item,
                                   std::set<std::string>& current_scope,
                                   int& stack_index,
                                   int inner_loop_count);
-std::string codegen_x86_declaration(std::shared_ptr<Declaration>& decl, 
-                                    std::map<std::string, int>& local_addresses,
-                                    std::set<std::string>& current_scope,
-                                    int& stack_index);
+std::string codegen_x86_declaration_list(std::shared_ptr<DeclarationList>& declist,
+                                         std::map<std::string, int>& local_addresses,
+                                         std::set<std::string>& current_scope,
+                                         int& stack_index);
+std::string codegen_x86_declaration(std::shared_ptr<Declaration>& item,
+                                              std::map<std::string, int>& local_addresses,
+                                              std::set<std::string>& current_scope,
+                                              int& stack_index);
 std::string codegen_x86_statement(std::shared_ptr<Statement>& stat, 
                                   std::map<std::string, int> local_addresses,
                                   std::set<std::string>& current_scope,
@@ -95,12 +97,14 @@ std::string codegen_x86_expression_relational(std::shared_ptr<ExpressionRelation
                                               std::map<std::string, int> local_addresses);
 std::string codegen_x86_expression_shift(std::shared_ptr<ExpressionShift>& exp, 
                                          std::map<std::string, int> local_addresses);
-std::string codegen_x86_expression_add_sub(std::shared_ptr<ExpressionAddSub>& exp, 
-                                           std::map<std::string, int> local_addresses);
-std::string codegen_x86_term(std::shared_ptr<Term>& term, 
-                             std::map<std::string, int> local_addresses);
-std::string codegen_x86_factor(std::shared_ptr<Factor>& factor, 
-                               std::map<std::string, int> local_addresses);
+std::string codegen_x86_expression_add(std::shared_ptr<ExpressionAdd>& exp, 
+                                       std::map<std::string, int> local_addresses);
+std::string codegen_x86_expression_mult(std::shared_ptr<ExpressionMult>& exp, 
+                                        std::map<std::string, int> local_addresses);
+std::string codegen_x86_expression_unary(std::shared_ptr<ExpressionUnary>& exp, 
+                                         std::map<std::string, int> local_addresses);
+std::string codegen_x86_expression_postfix(std::shared_ptr<ExpressionPostfix>& exp,
+                                           std::map<std::string, int>& local_addresses);
 
 std::string codegen_x86(Program& prog) {
     std::string out;
@@ -118,13 +122,19 @@ std::string codegen_x86_function(std::shared_ptr<Function>& function) {
     int inner_loop_count = -1;
     int stack_index = -4;   // stack offset for variables
 
+    if (function->param_types.size()) {
+        auto param_id = function->param_ids.rbegin();
+        for (int i=0; i<function->param_types.size(); i++) {
+            locals[*param_id] = 8 + 4*i;
+            std::advance(param_id, 1);
+        }
+    }
     boost::format out_format(
         ".globl _%s\n_"
         "%s:\n"
         "    pushl   %%ebp\n"
         "    movl    %%esp, %%ebp\n"
     );
-
     out_format % function->id % function->id;
     std::string out = out_format.str();
     for (auto item : function->items) {
@@ -146,14 +156,29 @@ std::string codegen_x86_block_item(std::shared_ptr<BlockItem>& item,
     if (item->item_type == "statement") {
         return codegen_x86_statement(item->statement, local_addresses, current_scope, stack_index, inner_loop_count);
     } else { // if (item->item_type == "variable_declaration") {
-        return codegen_x86_declaration(item->declaration, local_addresses, current_scope, stack_index);
+        return codegen_x86_declaration_list(item->declaration_list, local_addresses, current_scope, stack_index);
+    }
+}
+
+std::string codegen_x86_declaration_list(std::shared_ptr<DeclarationList>& declist,
+                                         std::map<std::string, int>& local_addresses,
+                                         std::set<std::string>& current_scope,
+                                         int& stack_index) {
+    if (declist->declarations.size() == 1) {
+        return codegen_x86_declaration(declist->declarations.front(), local_addresses, current_scope, stack_index);
+    } else {
+        std::string out = "";
+        for (auto decl: declist->declarations) {
+            out += codegen_x86_declaration(decl, local_addresses, current_scope, stack_index);
+        }
+        return out;
     }
 }
 
 std::string codegen_x86_declaration(std::shared_ptr<Declaration>& decl,
-                                    std::map<std::string, int>& local_addresses,
-                                    std::set<std::string>& current_scope,
-                                    int& stack_index) {
+                                              std::map<std::string, int>& local_addresses,
+                                              std::set<std::string>& current_scope,
+                                              int& stack_index) {
     if (current_scope.count(decl->var_id)) {
         throw std::runtime_error("variable '" + decl->var_id + "' already declared in this scope\n");
     }
@@ -166,7 +191,7 @@ std::string codegen_x86_declaration(std::shared_ptr<Declaration>& decl,
             "%s"                         // asm for variable value (stored in eax)
             "    pushl   %%eax\n"        // push variable onto stack
         );
-        format_str % codegen_x86_expression(decl->init_exp, local_addresses);
+        format_str % codegen_x86_expression_assignment(decl->init_exp, local_addresses);
         return format_str.str();
     } else {
         return std::string("    subl    $4, %esp\n");       // move the stack pointer past the new variable
@@ -569,9 +594,9 @@ std::string codegen_x86_expression_relational(std::shared_ptr<ExpressionRelation
 
 std::string codegen_x86_expression_shift(std::shared_ptr<ExpressionShift>& exp, std::map<std::string, int> local_addresses) {
     if (exp->expressions.size() == 1) {
-        return codegen_x86_expression_add_sub(exp->expressions.front(), local_addresses);
+        return codegen_x86_expression_add(exp->expressions.front(), local_addresses);
     } else {
-        std::string out = codegen_x86_expression_add_sub(
+        std::string out = codegen_x86_expression_add(
             exp->expressions.front(), local_addresses);             // asm for first operand (stored in eax)
         std::string shl_format_str = "    pushl   %%eax\n"          // push first operand to stack
                                      "%s"                           // asm for second operand (stored in eax)
@@ -590,11 +615,11 @@ std::string codegen_x86_expression_shift(std::shared_ptr<ExpressionShift>& exp, 
         for (auto op: exp->operators) {
             if (op == "<<") {
                 boost::format format_str(shl_format_str);
-                format_str % codegen_x86_expression_add_sub(*expression, local_addresses);
+                format_str % codegen_x86_expression_add(*expression, local_addresses);
                 out += format_str.str();
             } else { // if (op == ">>") {
                 boost::format format_str(shr_format_str);
-                format_str % codegen_x86_expression_add_sub(*expression, local_addresses);
+                format_str % codegen_x86_expression_add(*expression, local_addresses);
                 out += format_str.str();
             }
             std::advance(expression, 1);
@@ -603,13 +628,13 @@ std::string codegen_x86_expression_shift(std::shared_ptr<ExpressionShift>& exp, 
     }
 }
 
-std::string codegen_x86_expression_add_sub(std::shared_ptr<ExpressionAddSub>& exp, std::map<std::string, int> local_addresses) {
-    if (exp->terms.size() == 1) {
-        return codegen_x86_term(exp->terms.front(), local_addresses);
+std::string codegen_x86_expression_add(std::shared_ptr<ExpressionAdd>& exp, std::map<std::string, int> local_addresses) {
+    if (exp->expressions.size() == 1) {
+        return codegen_x86_expression_mult(exp->expressions.front(), local_addresses);
     } else {
         std::string out = 
-            codegen_x86_term(exp->terms.front(), 
-                             local_addresses);                      // asm for first operand (stored in eax)
+            codegen_x86_expression_mult(exp->expressions.front(), 
+                                        local_addresses);           // asm for first operand (stored in eax)
         std::string add_format_str = "    pushl   %%eax\n"          // push first operand to stack
                                      "%s"                           // asm for second operand (stored in eax)
                                      "    pop     %%ecx\n"          // pop first operand to ecx
@@ -621,31 +646,31 @@ std::string codegen_x86_expression_add_sub(std::shared_ptr<ExpressionAddSub>& ex
                                      "    pop     %%eax\n"          // pop first operand to eax
                                      "    subl    %%ecx, %%eax\n";  // compute eax - ecx and store in eax
 
-        auto term = exp->terms.begin();
-        std::advance(term, 1);
+        auto exp_mult = exp->expressions.begin();
+        std::advance(exp_mult, 1);
         for (auto op: exp->operators) {
             if (op == "+") {
                 boost::format format_str(add_format_str);
-                format_str % codegen_x86_term(*term, local_addresses);
+                format_str % codegen_x86_expression_mult(*exp_mult, local_addresses);
                 out += format_str.str();
             } else { // if (op == "-") {
                 boost::format format_str(sub_format_str);
-                format_str % codegen_x86_term(*term, local_addresses);
+                format_str % codegen_x86_expression_mult(*exp_mult, local_addresses);
                 out += format_str.str();
             }
-            std::advance(term, 1);
+            std::advance(exp_mult, 1);
         }
         return out;
     }
 }
 
-std::string codegen_x86_term(std::shared_ptr<Term>& term, std::map<std::string, int> local_addresses) {
-    if (term->factors.size() == 1) {
-        return codegen_x86_factor(term->factors.front(), local_addresses);
+std::string codegen_x86_expression_mult(std::shared_ptr<ExpressionMult>& exp, std::map<std::string, int> local_addresses) {
+    if (exp->expressions.size() == 1) {
+        return codegen_x86_expression_unary(exp->expressions.front(), local_addresses);
     } else {
         std::string out = 
-            codegen_x86_factor(term->factors.front(),
-                               local_addresses);                    // asm for first operand (stored in eax)
+            codegen_x86_expression_unary(exp->expressions.front(),
+                                         local_addresses);          // asm for first operand (stored in eax)
         std::string mul_format_str = "    pushl   %%eax\n"          // push first operand to stack
                                      "%s"                           // asm for second operand (stored in eax)
                                      "    pop     %%ecx\n"          // pop first operand to ecx
@@ -661,64 +686,111 @@ std::string codegen_x86_term(std::shared_ptr<Term>& term, std::map<std::string, 
         std::string mod_format_str = div_format_str +
                                      "    movl    %%edx, %%eax\n";  // moves the remainder stored in edx to eax
 
-        auto factor = term->factors.begin();
-        std::advance(factor, 1);
-        for (auto op: term->operators) {
+        auto exp_unary = exp->expressions.begin();
+        std::advance(exp_unary, 1);
+        for (auto op: exp->operators) {
             if (op == "*") {
                 boost::format out_format(mul_format_str);
-                out_format % codegen_x86_factor(*factor, local_addresses);
+                out_format % codegen_x86_expression_unary(*exp_unary, local_addresses);
                 out += out_format.str();
             } else if (op == "/") {
                 boost::format out_format(div_format_str);
-                out_format % codegen_x86_factor(*factor, local_addresses);
+                out_format % codegen_x86_expression_unary(*exp_unary, local_addresses);
                 out += out_format.str();
             } else { // if (*op == "%") {
                 boost::format out_format(mod_format_str);
-                out_format % codegen_x86_factor(*factor, local_addresses);
+                out_format % codegen_x86_expression_unary(*exp_unary, local_addresses);
                 out += out_format.str();
             }
-            std::advance(factor, 1);
+            std::advance(exp_unary, 1);
         }
         return out;
     }
 }
 
-std::string codegen_x86_factor(std::shared_ptr<Factor>& factor, std::map<std::string, int> local_addresses) {
-    if (factor->factor_type == "bracket_expression") {
-        return codegen_x86_expression(factor->expression, local_addresses);
-
-    } else if (factor->factor_type == "unary_op") {
-        if (factor->unaryop == "++" || factor->unaryop == "--") {
-            if (factor->factor->factor_type == "variable") {
-                std::string format_str = factor->unaryop == "++"? "    inc     %d(%%ebp)\n": "    dec     %d(%%ebp)\n";
-                boost::format out_format(format_str);
-
-                out_format % local_addresses[factor->factor->id];
-                return out_format.str();
+std::string codegen_x86_expression_unary(std::shared_ptr<ExpressionUnary>& exp, std::map<std::string, int> local_addresses) {
+    if (exp->exp_type == "postfix") {
+        return codegen_x86_expression_postfix(exp->postfix_exp, local_addresses);
+    } else { // if (exp->exp_type == "unary_op") {
+        if (exp->unaryop == "++" || exp->unaryop == "--") {
+            if (!local_addresses.count(exp->prefix_id)) {
+                throw std::runtime_error("prefix operator takes a modifiable rvalue\n");
             }
-        }
-        boost::format out_format(
-            "%s"
-            "%s"
-        );
-        out_format % codegen_x86_factor(factor->factor, local_addresses) % unary_ops[factor->unaryop];
-        return out_format.str();
+            if (!local_addresses.count(exp->prefix_id)) {
+                throw std::runtime_error("identifier '" + exp->prefix_id + "' not declared in this scope\n");
+            }
+            boost::format out_format(
+                "%s    %d(%%ebp)\n"                 // increment the variable in memory
+                "movl    %d(%%ebp), %%eax\n"        // return the incremented value
+            );
+            out_format % (exp->unaryop == "++"? "    incl": "    decl")
+                       % local_addresses[exp->prefix_id]
+                       % local_addresses[exp->prefix_id];
 
-    } else if (factor->factor_type == "variable") {
-        boost::format format_str(
-            "    movl    %d(%%ebp), %%eax\n"                // move the variable from the stack to eax
-        );
-        if (!local_addresses.count(factor->id)) {
-            throw std::runtime_error("identifier '" + factor->id + "' not declared in this scope\n");
-        }
-        format_str % local_addresses[factor->id];
-        return format_str.str();
+            return out_format.str();
 
-    } else { // if (factor->factor_type == "const") {
+        } else {
+            std::string out = codegen_x86_expression_unary(exp->unary_exp, local_addresses) + 
+                              unary_ops[exp->unaryop];
+            return out;
+        }
+    }
+}
+
+std::string codegen_x86_expression_postfix(std::shared_ptr<ExpressionPostfix>& exp,
+                                           std::map<std::string, int>& local_addresses) {
+    if (exp->exp_type == "const") {
         boost::format out_format(
             "    movl    $%d, %%eax\n"
         );
-        out_format % factor->value;
+        out_format % exp->value;
         return out_format.str();
+    } else if (exp->exp_type == "variable") {
+        boost::format out_format(
+            "    movl    %d(%%ebp), %%eax\n"                // move the variable from the stack to eax
+        );
+        if (!local_addresses.count(exp->id)) {
+            throw std::runtime_error("identifier '" + exp->id + "' not declared in this scope\n");
+        }
+        out_format % local_addresses[exp->id];
+        return out_format.str();
+    } else if (exp->exp_type == "postfix") {
+        boost::format out_format(
+            "    movl    %d(%%ebp), %%eax\n"
+            "    %s    %d(%%ebp)\n"
+        );
+        out_format % local_addresses[exp->postfix_exp->id]
+                   % (exp->postfix_op == "++"? "    incl": "    decl")
+                   % local_addresses[exp->postfix_exp->id];
+        return out_format.str();
+    } else if (exp->exp_type == "bracket_exp") {
+        return codegen_x86_expression(exp->bracket_exp, local_addresses);
+    } else { // if (exp->exp_type == "function_call") {
+        boost::format out_format(
+            "%s"                          // asm for function argumens
+            "    call    _%s\n"           // push return address and jump to function label
+        );
+        std::string args = "";
+        int arg_count = 0;
+        auto arg = exp->args.rbegin();
+        for (int i=0; i<exp->args.size(); i++) {
+            boost::format arg_format(
+                "%s"                        // asm for argument value
+                "    pushl   %%eax\n"       // push argument to stack
+            );
+            arg_format % codegen_x86_expression_assignment(*arg, local_addresses);
+            args += arg_format.str();
+
+            std::advance(arg, 1);
+            arg_count++;
+        }
+        out_format % args % exp->id;
+        
+        boost::format dealloc_format("");
+        if (arg_count) {
+            dealloc_format = boost::format("    addl    $%d, %%esp\n");
+            dealloc_format % (4*arg_count);
+        }
+        return out_format.str() + dealloc_format.str();;
     }
 }

@@ -6,6 +6,7 @@
 #include <boost/format.hpp>
 
 int global_counter = 0; // counter for jump labels
+std::map<std::string, std::shared_ptr<Function>> global_functions;
 
 std::map<std::string, std::string> unary_ops = {
     {"-",  "    neg     %eax\n"},
@@ -76,8 +77,8 @@ std::string codegen_x86_statement(std::shared_ptr<Statement>& stat,
                                   std::set<std::string>& current_scope,
                                   int stack_index,
                                   int inner_loop_count);
-std::string codegen_x86_expression(std::shared_ptr<Expression>& exp, 
-                                   std::map<std::string, int> local_addresses);
+std::string codegen_x86_expression_comma(std::shared_ptr<ExpressionComma>& exp, 
+                                         std::map<std::string, int> local_addresses);
 std::string codegen_x86_expression_assignment(std::shared_ptr<ExpressionAssignment>& exp, 
                                    std::map<std::string, int> local_addresses);
 std::string codegen_x86_expression_conditional(std::shared_ptr<ExpressionConditional>& exp, 
@@ -104,7 +105,7 @@ std::string codegen_x86_expression_mult(std::shared_ptr<ExpressionMult>& exp,
 std::string codegen_x86_expression_unary(std::shared_ptr<ExpressionUnary>& exp, 
                                          std::map<std::string, int> local_addresses);
 std::string codegen_x86_expression_postfix(std::shared_ptr<ExpressionPostfix>& exp,
-                                           std::map<std::string, int>& local_addresses);
+                                           std::map<std::string, int> local_addresses);
 
 std::string codegen_x86(Program& prog) {
     std::string out;
@@ -121,6 +122,8 @@ std::string codegen_x86_function(std::shared_ptr<Function>& function) {
     std::set<std::string> current_scope;
     int inner_loop_count = -1;
     int stack_index = -4;   // stack offset for variables
+
+    global_functions[function->id] = function;
 
     if (function->param_types.size()) {
         auto param_id = function->param_ids.rbegin();
@@ -204,9 +207,9 @@ std::string codegen_x86_statement(std::shared_ptr<Statement>& stat,
                                   int stack_index,
                                   int inner_loop_count) {
     if (stat->statement_type == "expression") {
-        return codegen_x86_expression(stat->expression1, local_addresses);
+        return codegen_x86_expression_comma(stat->expression1, local_addresses);
     } else if (stat->statement_type == "conditional") {
-        std::string out = codegen_x86_expression(
+        std::string out = codegen_x86_expression_comma(
             stat->expression1, local_addresses);           // asm for condition (stored in eax)
         boost::format out_format("    cmpl    $0, %%eax\n"      // test value of condition
                                  "    je      _e%d\n"           // if condition is 0, jump to else code
@@ -240,7 +243,7 @@ std::string codegen_x86_statement(std::shared_ptr<Statement>& stat,
                                          stack_index, 
                                          inner_loop_count);                 // asm for init declaration
         } else { // if (stat->statement_type == "for_expression") {
-            out = codegen_x86_expression(
+            out = codegen_x86_expression_comma(
                 stat->expression1, local_addresses);                   // asm for init expression
         }
         boost::format out_format("_cond%d:\n"                               // label for loop condition
@@ -254,11 +257,11 @@ std::string codegen_x86_statement(std::shared_ptr<Statement>& stat,
                                  "_end%d:\n"                                // label for end of loop
                                 );
         out_format % local_counter
-                   % codegen_x86_expression(stat->expression2, local_addresses)
+                   % codegen_x86_expression_comma(stat->expression2, local_addresses)
                    % local_counter
                    % codegen_x86_statement(stat->statement1, local_addresses, current_scope, stack_index, inner_loop_count)
                    % local_counter
-                   % codegen_x86_expression(stat->expression3, local_addresses)
+                   % codegen_x86_expression_comma(stat->expression3, local_addresses)
                    % local_counter
                    % local_counter;
 
@@ -276,7 +279,7 @@ std::string codegen_x86_statement(std::shared_ptr<Statement>& stat,
         int local_counter, inner_loop_count = global_counter;
         global_counter++;
         
-        std::string cond = codegen_x86_expression(stat->expression1, local_addresses);
+        std::string cond = codegen_x86_expression_comma(stat->expression1, local_addresses);
         std::string body = codegen_x86_statement(stat->statement1, local_addresses, current_scope, stack_index, inner_loop_count);
 
         std::string out_format = "";
@@ -354,12 +357,12 @@ std::string codegen_x86_statement(std::shared_ptr<Statement>& stat,
                                  "    pop     %%ebp\n"
                                  "    ret\n"
                                  );
-        out_format % codegen_x86_expression(stat->expression1, local_addresses);
+        out_format % codegen_x86_expression_comma(stat->expression1, local_addresses);
         return out_format.str();
     }
 }
 
-std::string codegen_x86_expression(std::shared_ptr<Expression>& exp, std::map<std::string, int> local_addresses) {
+std::string codegen_x86_expression_comma(std::shared_ptr<ExpressionComma>& exp, std::map<std::string, int> local_addresses) {
     if (exp->exp_type == "null") {
         return std::string("");
     } else { // if (exp->exp_type == "assignment") {
@@ -410,7 +413,7 @@ std::string codegen_x86_expression_conditional(std::shared_ptr<ExpressionConditi
         int local_counter = global_counter;
         global_counter++;
         format_str % local_counter
-                   % codegen_x86_expression(exp->exp_true, local_addresses)
+                   % codegen_x86_expression_comma(exp->exp_true, local_addresses)
                    % local_counter
                    % local_counter
                    % codegen_x86_expression_conditional(exp->exp_false, local_addresses)
@@ -431,7 +434,7 @@ std::string codegen_x86_expression_logic_or(std::shared_ptr<ExpressionLogicOr>& 
                                       "%s"                          // asm for second operand
                                       "    pop     %%ecx\n"         // pop first operand to ecx
                                       "    orl     %%ecx, %%eax\n"  // compute first operand | second operand, sets FLAGS
-                                      "    movl    $0, %%eax\n"     // zero-out eax
+                                      "    xorl    %%eax, %%eax\n"  // zero-out eax
                                       "    setne   %%al\n";         // set al to 1 iff first|second != 0
 
         auto expression = exp->expressions.begin();
@@ -720,7 +723,7 @@ std::string codegen_x86_expression_unary(std::shared_ptr<ExpressionUnary>& exp, 
                 throw std::runtime_error("identifier '" + exp->prefix_id + "' not declared in this scope\n");
             }
             boost::format out_format(
-                "%s    %d(%%ebp)\n"                 // increment the variable in memory
+                "%s    %d(%%ebp)\n"                 // increment/decrement the variable in memory
                 "movl    %d(%%ebp), %%eax\n"        // return the incremented value
             );
             out_format % (exp->unaryop == "++"? "    incl": "    decl")
@@ -738,12 +741,12 @@ std::string codegen_x86_expression_unary(std::shared_ptr<ExpressionUnary>& exp, 
 }
 
 std::string codegen_x86_expression_postfix(std::shared_ptr<ExpressionPostfix>& exp,
-                                           std::map<std::string, int>& local_addresses) {
-    if (exp->exp_type == "const") {
+                                           std::map<std::string, int> local_addresses) {
+    if (exp->exp_type == "const_int") {
         boost::format out_format(
             "    movl    $%d, %%eax\n"
         );
-        out_format % exp->value;
+        out_format % exp->value_int;
         return out_format.str();
     } else if (exp->exp_type == "variable") {
         boost::format out_format(
@@ -764,7 +767,7 @@ std::string codegen_x86_expression_postfix(std::shared_ptr<ExpressionPostfix>& e
                    % local_addresses[exp->postfix_exp->id];
         return out_format.str();
     } else if (exp->exp_type == "bracket_exp") {
-        return codegen_x86_expression(exp->bracket_exp, local_addresses);
+        return codegen_x86_expression_comma(exp->bracket_exp, local_addresses);
     } else { // if (exp->exp_type == "function_call") {
         boost::format out_format(
             "%s"                          // asm for function argumens

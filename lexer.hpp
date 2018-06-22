@@ -8,6 +8,7 @@ std::list<std::string> lex(std::ifstream& file) {
     std::list<std::string> token_regexes = {
                                             // Keywords and grouping
                                             "int[^\\w]",                        // int keyword
+                                            "float[^\\w]",                      // float keyword
                                             "return[^\\w]",                     // return keyword
                                             "if[^\\w]",                         // if keyword
                                             "else[^\\w]",                       // else keyword
@@ -77,9 +78,12 @@ std::list<std::string> lex(std::ifstream& file) {
                                             ":",                                // colon
                                             "\\?",                              // question mark
                                             "[A-Za-z_]\\w*[^\\w]",              // identifiers
+                                            "[0-9]*\\.[0-9]*[^0-9]",            // decimal float literals
+                                            // add sci notation float literals (0.3e10)
+                                            // add hex float literals (0x0.3e10)
                                             "0[xX][0-9a-fA-f]+[^0-9a-fA-F]",    // hex literals
-                                            "0[^xX0-7]|0[0-7]+[^0-7]",          // octal and zero literals
-                                            "[1-9][0-9]*[^0-9]"                 // decimal literals
+                                            "0[^xX0-7]|0[0-7]+[^0-7.]",         // octal and zero literals
+                                            "[1-9][0-9]*[^0-9.]"                // decimal literals
     };        
     std::list<std::string> tokens = {};
     std::string candidate;

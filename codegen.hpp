@@ -60,21 +60,21 @@ std::map<std::string, std::string> assignment_ops = {
 std::string codegen_x86_program(Program program);
 std::string codegen_x86_function(std::shared_ptr<Function> function);
 std::string codegen_x86_block_item(std::shared_ptr<BlockItem> item, 
-                                  std::map<std::string, int>& local_addresses,
-                                  std::set<std::string>& current_scope,
-                                  int& stack_index,
-                                  int& inner_loop_stack_index,
-                                  int inner_loop_count);
+                                   std::map<std::string, int>& local_addresses,
+                                   std::set<std::string>& current_scope,
+                                   int& stack_index,
+                                   int& inner_loop_stack_index,
+                                   int inner_loop_count);
 std::string codegen_x86_declaration_list(std::shared_ptr<DeclarationList> declist,
                                          std::map<std::string, int>& local_addresses,
                                          std::set<std::string>& current_scope,
                                          int& stack_index,
                                          int& inner_loop_stack_index);
 std::string codegen_x86_declaration(std::shared_ptr<Declaration> item,
-                                              std::map<std::string, int>& local_addresses,
-                                              std::set<std::string>& current_scope,
-                                              int& stack_index,
-                                              int& inner_loop_stack_index);
+                                    std::map<std::string, int>& local_addresses,
+                                    std::set<std::string>& current_scope,
+                                    int& stack_index,
+                                    int& inner_loop_stack_index);
 std::string codegen_x86_statement(std::shared_ptr<Statement> stat, 
                                   std::map<std::string, int> local_addresses,
                                   std::set<std::string>& current_scope,
@@ -84,9 +84,9 @@ std::string codegen_x86_statement(std::shared_ptr<Statement> stat,
 std::string codegen_x86_expression_comma(std::shared_ptr<ExpressionComma> exp, 
                                          std::map<std::string, int> local_addresses);
 std::string codegen_x86_expression_assignment(std::shared_ptr<ExpressionAssignment> exp, 
-                                   std::map<std::string, int> local_addresses);
+                                              std::map<std::string, int> local_addresses);
 std::string codegen_x86_expression_conditional(std::shared_ptr<ExpressionConditional> exp, 
-                                   std::map<std::string, int> local_addresses);
+                                               std::map<std::string, int> local_addresses);
 std::string codegen_x86_expression_logic_or(std::shared_ptr<ExpressionLogicOr> exp, 
                                             std::map<std::string, int> local_addresses);
 std::string codegen_x86_expression_logic_and(std::shared_ptr<ExpressionLogicAnd> exp, 
@@ -268,8 +268,7 @@ std::string codegen_x86_statement(std::shared_ptr<Statement> stat,
         int local_counter = global_counter;
         int inner_loop_count = global_counter;
         global_counter++;
-        int inner_loop_stack_index = stack_index; // save stack position of this scope for continue and break statements
-
+        
         if (stat->statement_type == "for_declaration") {
             out = codegen_x86_block_item(stat->items.front(), 
                                          local_addresses, 
@@ -281,6 +280,7 @@ std::string codegen_x86_statement(std::shared_ptr<Statement> stat,
             out = codegen_x86_expression_comma(
                 stat->expression1, local_addresses);                   // asm for init expression
         }
+        int inner_loop_stack_index = stack_index; // save stack position of the loop body scope for continue and break statements
         boost::format out_format("_cond%d:\n"                               // label for loop condition
                                  "%s"                                       // asm for condition expression (stored in eax)
                                  "    cmpl    $0, %%eax\n"                  // compare condition to 0
@@ -314,7 +314,7 @@ std::string codegen_x86_statement(std::shared_ptr<Statement> stat,
         int local_counter = global_counter;
         int inner_loop_count = global_counter;
         global_counter++;
-        int inner_loop_stack_index = stack_index;
+        int inner_loop_stack_index = stack_index; // save stack position of the loop body scope for continue and break statements
         
         std::string cond = codegen_x86_expression_comma(stat->expression1, local_addresses);
         std::string body = codegen_x86_statement(stat->statement1, local_addresses, current_scope, stack_index, inner_loop_stack_index, inner_loop_count);

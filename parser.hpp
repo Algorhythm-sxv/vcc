@@ -30,15 +30,17 @@
 //                   | "(" <exp> ")"
 //                   | <const>
 
-#ifndef parser
+#ifndef PARSER
 #include <list>
 #include <regex>
 #include <set>
 #include <string>
 
+#ifdef JSON
 #include "json.hpp"
 
 using json = nlohmann::json;
+#endif
 
 // set of reserved keywords
 std::set<std::string> keywords = {"return", "int", "float", "while", "do", "for", "break", "continue", "if", "else"};
@@ -94,6 +96,7 @@ std::shared_ptr<ExpressionMult> parse_expression_mult(std::list<std::string>& to
 std::shared_ptr<ExpressionUnary> parse_expression_unary(std::list<std::string>& tokens);
 std::shared_ptr<ExpressionPostfix> parse_expression_postfix(std::list<std::string>& tokens);
 
+#ifdef JSON
 json jsonify_program(Program& prog);
 json jsonify_function(std::shared_ptr<Function>& fun);
 json jsonify_block_item(std::shared_ptr<BlockItem>& item);
@@ -115,6 +118,7 @@ json jsonify_expression_add(std::shared_ptr<ExpressionAdd>& exp);
 json jsonify_expression_mult(std::shared_ptr<ExpressionMult>& exp);
 json jsonify_expression_unary(std::shared_ptr<ExpressionUnary>& exp);
 json jsonify_expression_postfix(std::shared_ptr<ExpressionPostfix>& exp);
+#endif
 
 class Program {
     public:
@@ -125,9 +129,8 @@ class Function {
     public:
     std::string return_type;
     std::string id;
-    // std::shared_ptr<ParameterList> params;
-    std::list<std::string> param_ids;
-    std::list<std::string> param_types;
+    std::list<std::pair<std::string, std::string>> params;
+    bool defined = false;
     std::list<std::shared_ptr<BlockItem>> items;
 };
 
@@ -282,6 +285,8 @@ Program parse_program(std::list<std::string> tokens) {
 
     return prog;
 }
+
+#ifdef JSON
 json jsonify_program(Program& prog) {
     json ast;
     auto it = prog.functions.begin();
@@ -293,6 +298,7 @@ json jsonify_program(Program& prog) {
 
     return ast;
 }
+#endif
 
 std::shared_ptr<Function> parse_function(std::list<std::string>& tokens) {
     auto fun = std::shared_ptr<Function>(new Function);
@@ -319,20 +325,28 @@ std::shared_ptr<Function> parse_function(std::list<std::string>& tokens) {
             tokens.pop_front();
 
             first_param:
+            std::pair<std::string, std::string> param;
             if (!types.count(tokens.front())) {
-                throw std::runtime_error("function parameters must have type declaration");
+                throw std::runtime_error("function parameters must have type declaration\n");
             }
-            fun->param_types.push_back(tokens.front());
+            param.first = tokens.front();
             tokens.pop_front();
 
-            if (tokens.front() == ",") {
-                throw std::runtime_error("expected identifier in function parameter\n");
+            // if the parameter is not identified
+            if (tokens.front() == "," || tokens.front() == ")") {
+                param.second = "";
+
+                fun->params.push_back(param);
+                continue;
             }
-            if (keywords.count(tokens.front())) {
+            if (keywords.count(tokens.front()) || 
+                !std::regex_match(tokens.front(), std::regex("[A-Za-z_]\\w*"))) {
                 throw std::runtime_error("invalid identifier: " + tokens.front() + "\n");
             }
-            fun->param_ids.push_back(tokens.front());
+            param.second = tokens.front();
             tokens.pop_front();
+            
+            fun->params.push_back(param);
         } while (tokens.front() == ",");
     }
 
@@ -341,10 +355,14 @@ std::shared_ptr<Function> parse_function(std::list<std::string>& tokens) {
     }
     tokens.pop_front();
 
-    if (tokens.front() != "{") {
-        throw std::runtime_error("expected '{' after function parameters, got: " + tokens.front() + "\n");
+    if (tokens.front() == ";") {
+        tokens.pop_front();
+        return fun;
+    } else if (tokens.front() != "{") {
+        throw std::runtime_error("expected '{' or ';' after function parameters, got: " + tokens.front() + "\n");
     }
     tokens.pop_front();
+    fun->defined = true;
 
     while (tokens.front() != "}") {
         fun->items.push_back(parse_block_item(tokens));
@@ -354,20 +372,19 @@ std::shared_ptr<Function> parse_function(std::list<std::string>& tokens) {
     return fun;
 }
 
+#ifdef JSON
 json jsonify_function(std::shared_ptr<Function>& fun) {
     json ast = {
         {"identifier", fun->id},
         {"return_type", fun->return_type}
     };
-    if (fun->param_ids.size()) {
-        auto param_type = fun->param_types.begin();
-        for (auto param: fun->param_ids) {
+    if (fun->params.size()) {
+        for (auto param: fun->params) {
             json param_json = {
-                {"type", *param_type},
-                {"id", param}
+                {"type", param.first},
+                {"id", param.second}
             };
             ast["parameters"] += param_json;
-            std::advance(param_type, 1);
         }
     }
     auto it = fun->items.begin();
@@ -381,6 +398,7 @@ json jsonify_function(std::shared_ptr<Function>& fun) {
 
     return ast;
 }
+#endif
 
 std::shared_ptr<BlockItem> parse_block_item(std::list<std::string>& tokens) {
     auto item = std::shared_ptr<BlockItem>(new BlockItem);
@@ -397,6 +415,7 @@ std::shared_ptr<BlockItem> parse_block_item(std::list<std::string>& tokens) {
     return item;
 }
 
+#ifdef JSON
 json jsonify_block_item(std::shared_ptr<BlockItem>& item) {
     if (item->item_type == "statement") {
         return jsonify_statement(item->statement);
@@ -404,6 +423,7 @@ json jsonify_block_item(std::shared_ptr<BlockItem>& item) {
         return jsonify_declaration_list(item->declaration_list);
     }
 }
+#endif
 
 std::shared_ptr<DeclarationList> parse_declaration_list(std::list<std::string>& tokens) {
     auto declist = std::shared_ptr<DeclarationList>(new DeclarationList);
@@ -425,6 +445,7 @@ std::shared_ptr<DeclarationList> parse_declaration_list(std::list<std::string>& 
     return declist;
 }
 
+#ifdef JSON
 json jsonify_declaration_list(std::shared_ptr<DeclarationList>& declist) {
     if (declist->declarations.size() == 1) {
         return jsonify_declaration(declist->declarations.front());
@@ -437,6 +458,8 @@ json jsonify_declaration_list(std::shared_ptr<DeclarationList>& declist) {
         return ast;
     }
 }
+#endif
+
 std::shared_ptr<Declaration> parse_declaration(std::list<std::string>& tokens) {
     auto decl = std::shared_ptr<Declaration>(new Declaration);
 
@@ -454,6 +477,7 @@ std::shared_ptr<Declaration> parse_declaration(std::list<std::string>& tokens) {
     return decl;
 }
 
+#ifdef JSON
 json jsonify_declaration(std::shared_ptr<Declaration>& decl) {
     json ast = {
         {"id", decl->var_id}
@@ -463,6 +487,7 @@ json jsonify_declaration(std::shared_ptr<Declaration>& decl) {
     }
     return ast;
 }
+#endif
 
 std::shared_ptr<Statement> parse_statement(std::list<std::string>& tokens) {
     auto stat = std::shared_ptr<Statement>(new Statement);
@@ -497,6 +522,10 @@ std::shared_ptr<Statement> parse_statement(std::list<std::string>& tokens) {
         if (tokens.front() == "else") {
             tokens.pop_front();
             stat->statement2 = parse_statement(tokens);
+        } else {
+            // if no else statment exists, a single semicolon will parse to a null expression
+            tokens.push_front(";");
+            stat->statement2 = parse_statement(tokens);
         }
     } else if (tokens.front() == "else") {
         throw std::runtime_error("'else' statement has no parent 'if' statement\n");
@@ -526,8 +555,8 @@ std::shared_ptr<Statement> parse_statement(std::list<std::string>& tokens) {
         stat->expression2 = parse_expression_comma(tokens);
         // replace empty conditions with true (1)
         if (stat->expression2->exp_type == "null") {
-            std::list<std::string> placeholder_tokens = {"1"};
-            stat->expression2 = parse_expression_comma(placeholder_tokens);
+            tokens.push_front("1");
+            stat->expression2 = parse_expression_comma(tokens);
         }
 
         if (tokens.front() != ";") {
@@ -624,6 +653,7 @@ std::shared_ptr<Statement> parse_statement(std::list<std::string>& tokens) {
     return stat;
 }
 
+#ifdef JSON
 json jsonify_statement(std::shared_ptr<Statement>& stat) {
     if (stat->statement_type == "expression") {
         return jsonify_expression_comma(stat->expression1);
@@ -659,6 +689,7 @@ json jsonify_statement(std::shared_ptr<Statement>& stat) {
         return ast;
     }
 }
+#endif
 
 std::shared_ptr<ExpressionComma> parse_expression_comma(std::list<std::string>& tokens) {
     auto exp = std::shared_ptr<ExpressionComma>(new ExpressionComma);
@@ -679,6 +710,7 @@ std::shared_ptr<ExpressionComma> parse_expression_comma(std::list<std::string>& 
     }
 }
 
+#ifdef JSON
 json jsonify_expression_comma(std::shared_ptr<ExpressionComma>& exp) {
     json ast;
     if (exp->exp_type == "null") {
@@ -696,6 +728,7 @@ json jsonify_expression_comma(std::shared_ptr<ExpressionComma>& exp) {
         return ast;
     }
 }
+#endif
 
 std::shared_ptr<ExpressionAssignment> parse_expression_assignment(std::list<std::string>& tokens) {
     auto exp = std::shared_ptr<ExpressionAssignment>(new ExpressionAssignment);
@@ -734,6 +767,7 @@ std::shared_ptr<ExpressionAssignment> parse_expression_assignment(std::list<std:
     }
 }
 
+#ifdef JSON
 json jsonify_expression_assignment(std::shared_ptr<ExpressionAssignment>& exp) {
     if (exp->exp_type == "conditional") {
         return jsonify_expression_conditional(exp->expression);
@@ -747,6 +781,7 @@ json jsonify_expression_assignment(std::shared_ptr<ExpressionAssignment>& exp) {
         return ast;
     }
 }
+#endif
 
 std::shared_ptr<ExpressionConditional> parse_expression_conditional(std::list<std::string>& tokens) {
     auto exp = std::shared_ptr<ExpressionConditional>(new ExpressionConditional);
@@ -770,6 +805,7 @@ std::shared_ptr<ExpressionConditional> parse_expression_conditional(std::list<st
     return exp;
 }
 
+#ifdef JSON
 json jsonify_expression_conditional(std::shared_ptr<ExpressionConditional>& exp) {
     if (exp->exp_type == "logic_or") {
         return jsonify_expression_logic_or(exp->condition);
@@ -783,6 +819,7 @@ json jsonify_expression_conditional(std::shared_ptr<ExpressionConditional>& exp)
         return ast;
     }
 }
+#endif
 
 std::shared_ptr<ExpressionLogicOr> parse_expression_logic_or(std::list<std::string>& tokens) {
     auto exp = std::shared_ptr<ExpressionLogicOr>(new ExpressionLogicOr);
@@ -798,6 +835,7 @@ std::shared_ptr<ExpressionLogicOr> parse_expression_logic_or(std::list<std::stri
     return exp;
 }
 
+#ifdef JSON
 json jsonify_expression_logic_or(std::shared_ptr<ExpressionLogicOr>& exp) {
     if (exp->expressions.size() == 1) {
         return jsonify_expression_logic_and(exp->expressions.front());
@@ -820,6 +858,7 @@ json jsonify_expression_logic_or(std::shared_ptr<ExpressionLogicOr>& exp) {
         return ast;
     }
 }
+#endif
 
 std::shared_ptr<ExpressionLogicAnd> parse_expression_logic_and(std::list<std::string>& tokens) {
     auto exp = std::shared_ptr<ExpressionLogicAnd>(new ExpressionLogicAnd);
@@ -835,6 +874,7 @@ std::shared_ptr<ExpressionLogicAnd> parse_expression_logic_and(std::list<std::st
     return exp;
 }
 
+#ifdef JSON
 json jsonify_expression_logic_and(std::shared_ptr<ExpressionLogicAnd>& exp) {
     if (exp->expressions.size() == 1) {
         return jsonify_expression_bitwise_or(exp->expressions.front());
@@ -857,6 +897,7 @@ json jsonify_expression_logic_and(std::shared_ptr<ExpressionLogicAnd>& exp) {
         return ast;
     }
 }
+#endif
 
 std::shared_ptr<ExpressionBitwiseOr> parse_expression_bitwise_or(std::list<std::string>& tokens) {
     auto exp = std::shared_ptr<ExpressionBitwiseOr>(new ExpressionBitwiseOr);
@@ -873,6 +914,7 @@ std::shared_ptr<ExpressionBitwiseOr> parse_expression_bitwise_or(std::list<std::
     return exp;
 }
 
+#ifdef JSON
 json jsonify_expression_bitwise_or(std::shared_ptr<ExpressionBitwiseOr>& exp) {
     if (exp->expressions.size() == 1) {
         return jsonify_expression_bitwise_xor(exp->expressions.front());
@@ -895,6 +937,7 @@ json jsonify_expression_bitwise_or(std::shared_ptr<ExpressionBitwiseOr>& exp) {
         return ast;
     }
 }
+#endif
 
 std::shared_ptr<ExpressionBitwiseXor> parse_expression_bitwise_xor(std::list<std::string>& tokens) {
     auto exp = std::shared_ptr<ExpressionBitwiseXor>(new ExpressionBitwiseXor);
@@ -911,6 +954,7 @@ std::shared_ptr<ExpressionBitwiseXor> parse_expression_bitwise_xor(std::list<std
     return exp;
 }
 
+#ifdef JSON
 json jsonify_expression_bitwise_xor(std::shared_ptr<ExpressionBitwiseXor>& exp) {
     if (exp->expressions.size() == 1) {
         return jsonify_expression_bitwise_and(exp->expressions.front());
@@ -933,6 +977,7 @@ json jsonify_expression_bitwise_xor(std::shared_ptr<ExpressionBitwiseXor>& exp) 
         return ast;
     }
 }
+#endif
 
 std::shared_ptr<ExpressionBitwiseAnd> parse_expression_bitwise_and(std::list<std::string>& tokens) {
     auto exp = std::shared_ptr<ExpressionBitwiseAnd>(new ExpressionBitwiseAnd);
@@ -949,6 +994,7 @@ std::shared_ptr<ExpressionBitwiseAnd> parse_expression_bitwise_and(std::list<std
     return exp;
 }
 
+#ifdef JSON
 json jsonify_expression_bitwise_and(std::shared_ptr<ExpressionBitwiseAnd>& exp) {
     if (exp->expressions.size() == 1) {
         return jsonify_expression_equality(exp->expressions.front());
@@ -971,6 +1017,7 @@ json jsonify_expression_bitwise_and(std::shared_ptr<ExpressionBitwiseAnd>& exp) 
         return ast;
     }
 }
+#endif
 
 std::shared_ptr<ExpressionEquality> parse_expression_equality(std::list<std::string>& tokens) {
     auto exp = std::shared_ptr<ExpressionEquality>(new ExpressionEquality);
@@ -988,6 +1035,7 @@ std::shared_ptr<ExpressionEquality> parse_expression_equality(std::list<std::str
     return exp;
 }
 
+#ifdef JSON
 json jsonify_expression_equality(std::shared_ptr<ExpressionEquality>& exp) {
     if (exp->expressions.size() == 1) {
         return jsonify_expression_relational(exp->expressions.front());
@@ -1010,6 +1058,7 @@ json jsonify_expression_equality(std::shared_ptr<ExpressionEquality>& exp) {
         return ast;
     }
 }
+#endif
 
 std::shared_ptr<ExpressionRelational> parse_expression_relational(std::list<std::string>& tokens) {
     auto exp = std::shared_ptr<ExpressionRelational>(new ExpressionRelational);
@@ -1028,6 +1077,7 @@ std::shared_ptr<ExpressionRelational> parse_expression_relational(std::list<std:
     return exp;
 }
 
+#ifdef JSON
 json jsonify_expression_relational(std::shared_ptr<ExpressionRelational>& exp) {
     if (exp->expressions.size() == 1) {
         return jsonify_expression_shift(exp->expressions.front());
@@ -1050,6 +1100,7 @@ json jsonify_expression_relational(std::shared_ptr<ExpressionRelational>& exp) {
         return ast;
     }
 }
+#endif
 
 std::shared_ptr<ExpressionShift> parse_expression_shift(std::list<std::string>& tokens) {
     auto exp = std::shared_ptr<ExpressionShift>(new ExpressionShift);
@@ -1067,6 +1118,7 @@ std::shared_ptr<ExpressionShift> parse_expression_shift(std::list<std::string>& 
     return exp;
 }
 
+#ifdef JSON
 json jsonify_expression_shift(std::shared_ptr<ExpressionShift>& exp) {
     if (exp->expressions.size() == 1) {
         return jsonify_expression_add(exp->expressions.front());
@@ -1089,6 +1141,7 @@ json jsonify_expression_shift(std::shared_ptr<ExpressionShift>& exp) {
         return ast;
     }
 }
+#endif
 
 std::shared_ptr<ExpressionAdd> parse_expression_add(std::list<std::string>& tokens) {
     auto exp = std::shared_ptr<ExpressionAdd>(new ExpressionAdd);
@@ -1106,6 +1159,7 @@ std::shared_ptr<ExpressionAdd> parse_expression_add(std::list<std::string>& toke
     return exp;
 }
 
+#ifdef JSON
 json jsonify_expression_add(std::shared_ptr<ExpressionAdd>& exp) {
     if (exp->expressions.size() == 1) {
         return jsonify_expression_mult(exp->expressions.front());
@@ -1127,6 +1181,7 @@ json jsonify_expression_add(std::shared_ptr<ExpressionAdd>& exp) {
         return ast;
     }
 }
+#endif
 
 std::shared_ptr<ExpressionMult> parse_expression_mult(std::list<std::string>& tokens) {
     auto exp = std::shared_ptr<ExpressionMult>(new ExpressionMult);
@@ -1143,6 +1198,7 @@ std::shared_ptr<ExpressionMult> parse_expression_mult(std::list<std::string>& to
     return exp;
 }
 
+#ifdef JSON
 json jsonify_expression_mult(std::shared_ptr<ExpressionMult>& exp) {
     if (exp->expressions.size() == 1) {
         return jsonify_expression_unary(exp->expressions.front());
@@ -1164,6 +1220,8 @@ json jsonify_expression_mult(std::shared_ptr<ExpressionMult>& exp) {
         return ast;
     }
 }
+#endif
+
 
 std::shared_ptr<ExpressionUnary> parse_expression_unary(std::list<std::string>& tokens) {
     auto exp = std::shared_ptr<ExpressionUnary>(new ExpressionUnary);
@@ -1192,6 +1250,7 @@ std::shared_ptr<ExpressionUnary> parse_expression_unary(std::list<std::string>& 
     return exp;
 }
 
+#ifdef JSON
 json jsonify_expression_unary(std::shared_ptr<ExpressionUnary>& exp) {
     if (exp->exp_type == "postfix") {
         return jsonify_expression_postfix(exp->postfix_exp);
@@ -1211,6 +1270,7 @@ json jsonify_expression_unary(std::shared_ptr<ExpressionUnary>& exp) {
         return ast;
     }
 }
+#endif
 
 std::shared_ptr<ExpressionPostfix> parse_expression_postfix(std::list<std::string>& tokens) {
     auto exp = std::shared_ptr<ExpressionPostfix>(new ExpressionPostfix);
@@ -1225,6 +1285,8 @@ std::shared_ptr<ExpressionPostfix> parse_expression_postfix(std::list<std::strin
         if (tokens.front() != ")") {
             throw std::runtime_error("missing closing ')'");
         }
+        tokens.pop_front();
+
         return exp;
     } else if (std::regex_match(tokens.front(), std::regex("[A-Za-z]\\w*"))) {
         if (keywords.count(tokens.front())) {
@@ -1237,10 +1299,13 @@ std::shared_ptr<ExpressionPostfix> parse_expression_postfix(std::list<std::strin
             exp->exp_type = "function_call";
             tokens.pop_front();
 
-            exp->args.push_back(parse_expression_assignment(tokens));
-            while (tokens.front() == ",") {
-                tokens.pop_front();
-                exp->args.push_back(parse_expression_assignment(tokens));
+            if (tokens.front() != ")") {
+                exp->args.push_back(parse_expression_assignment(tokens)); 
+            
+                while (tokens.front() == ",") {
+                    tokens.pop_front();
+                    exp->args.push_back(parse_expression_assignment(tokens));
+                }
             }
             if (tokens.front() != ")") {
                 throw std::runtime_error("missing closing ')' after function call");
@@ -1264,14 +1329,16 @@ std::shared_ptr<ExpressionPostfix> parse_expression_postfix(std::list<std::strin
             exp->value_int = std::stoi(tokens.front(), nullptr, 0);
         } catch (std::out_of_range) {
             throw std::runtime_error("integer literal out of range: " + tokens.front() + "\n");
-        } catch (std::invalid_argument){
-        } try {
-            exp->exp_type = "const_float";
-            exp->value_float = std::stof(tokens.front(), nullptr);
-        } catch (std::out_of_range) {
-            throw std::runtime_error("float literal out of range: " + tokens.front() + "\n");
         } catch (std::invalid_argument) {
-            throw std::runtime_error("invalid literal: " + tokens.front() + "\n");
+            throw std::runtime_error("invalid integer literal: " + tokens.front() + "\n");
+            // try {
+            //     exp->exp_type = "const_float";
+            //     exp->value_float = std::stof(tokens.front(), nullptr);
+            // } catch (std::out_of_range) {
+            //     throw std::runtime_error("float literal out of range: " + tokens.front() + "\n");
+            // } catch (std::invalid_argument) {
+            //     throw std::runtime_error("invalid literal: " + tokens.front() + "\n");
+            // }
         }
         tokens.pop_front();
         
@@ -1279,6 +1346,7 @@ std::shared_ptr<ExpressionPostfix> parse_expression_postfix(std::list<std::strin
     }
 }
 
+#ifdef JSON
 json jsonify_expression_postfix(std::shared_ptr<ExpressionPostfix>& exp) {
     if (exp->exp_type == "const_int") {
         return exp->value_int;
@@ -1319,6 +1387,7 @@ json jsonify_expression_postfix(std::shared_ptr<ExpressionPostfix>& exp) {
         return ast;
     }
 }
+#endif
 
-#define parser
+#define PARSER
 #endif

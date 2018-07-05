@@ -8,7 +8,7 @@ std::list<std::string> lex(std::ifstream& file) {
     std::list<std::string> token_regexes = {
                                             // Keywords and grouping
                                             "int[^\\w]",                        // int keyword
-                                            "float[^\\w]",                      // float keyword
+                                            // "float[^\\w]",                      // float keyword
                                             "return[^\\w]",                     // return keyword
                                             "if[^\\w]",                         // if keyword
                                             "else[^\\w]",                       // else keyword
@@ -36,7 +36,7 @@ std::list<std::string> lex(std::ifstream& file) {
                                             "%[^=]",                            // modulo
 
                                             "\\+[^=+]",                         // addition
-                                            "-[^=-]",                            // subtraction
+                                            "-[^=-]",                           // subtraction
 
                                             "<<[^=]",                           // left shift
                                             ">>[^=]",                           // right shift
@@ -66,7 +66,7 @@ std::list<std::string> lex(std::ifstream& file) {
                                             "/=[\\S\\s]",                       // compound division assignment
                                             "%=[\\S\\s]",                       // compound modulo assignment
                                             "&=[\\S\\s]",                       // compound bitwise AND assignment
-                                            "^=[\\S\\s]",                       // compound bitwise XOR assignment
+                                            "\\^=[\\S\\s]",                     // compound bitwise XOR assignment
                                             "\\|=[\\S\\s]",                     // compound bitwise OR assignment
                                             "<<=[\\S\\s]",                      // compound left shift assignment
                                             ">>=[\\S\\s]",                      // compound right shift assignment
@@ -78,7 +78,7 @@ std::list<std::string> lex(std::ifstream& file) {
                                             ":",                                // colon
                                             "\\?",                              // question mark
                                             "[A-Za-z_]\\w*[^\\w]",              // identifiers
-                                            "[0-9]*\\.[0-9]*[^0-9]",            // decimal float literals
+                                            // "[0-9]*\\.[0-9]*[^0-9]",            // decimal float literals
                                             // add sci notation float literals (0.3e10)
                                             // add hex float literals (0x0.3e10)
                                             "0[xX][0-9a-fA-f]+[^0-9a-fA-F]",    // hex literals
